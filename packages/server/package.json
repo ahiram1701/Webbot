@@ -1,0 +1,23 @@
+{
+  "name": "@webbot/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mcp": "tsx src/stdio.ts",
+    "http": "tsx src/http.ts",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@webbot/shared": "*",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "ws": "^8.20.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/ws": "^8.18.1"
+  }
+}

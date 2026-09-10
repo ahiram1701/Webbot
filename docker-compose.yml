@@ -1,0 +1,22 @@
+services:
+  webbot-server:
+    build: .
+    container_name: webbot-server
+    restart: unless-stopped
+    environment:
+      # Obligatorio: si no esta definido en .env, compose se niega a arrancar.
+      WEBBOT_TOKEN: ${WEBBOT_TOKEN:?define WEBBOT_TOKEN en el fichero .env}
+      WEBBOT_BRIDGE_HOST: 0.0.0.0
+      WEBBOT_BRIDGE_PORT: 8790
+      WEBBOT_HTTP_PORT: 8791
+      WEBBOT_REQUEST_TIMEOUT_MS: ${WEBBOT_REQUEST_TIMEOUT_MS:-30000}
+    ports:
+      # Publicados solo en el loopback del host: la extension llega, la red local no.
+      - "127.0.0.1:8790:8790"
+      - "127.0.0.1:8791:8791"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8791/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

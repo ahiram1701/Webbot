@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node", "chrome"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "paths": {
+      "@webbot/shared": ["./packages/shared/src/index.ts"],
+      "@webbot/shared/*": ["./packages/shared/src/*"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/extension/*.ts", "vitest.config.ts"]
+}

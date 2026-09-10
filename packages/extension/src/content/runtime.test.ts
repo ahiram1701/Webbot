@@ -1,0 +1,368 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { installWebbotRuntime, type WebbotApi } from "./runtime.js";
+
+/**
+ * El runtime viaja a la pagina como TEXTO (chrome.scripting.executeScript solo serializa la
+ * funcion, no su closure). Instalarlo aqui con `new Function` sobre su propio codigo fuente
+ * reproduce esa condicion: si algun dia alguien referencia una variable del modulo desde dentro,
+ * este test falla con ReferenceError en vez de fallar en produccion sobre una pagina real.
+ */
+function installFromSource(): WebbotApi {
+  delete (globalThis as { __webbot?: unknown }).__webbot;
+  const factory = new Function(`return (${installWebbotRuntime.toString()})`)() as () => void;
+  factory();
+  const api = (globalThis as { __webbot?: WebbotApi }).__webbot;
+  if (!api) throw new Error("el runtime no se instalo");
+  return api;
+}
+
+/**
+ * jsdom no calcula layout ni implementa innerText, asi que sin estos apanos todo elemento seria
+ * "invisible" y sin texto. En Chrome ambos son nativos.
+ */
+function patchJsdom(): void {
+  Element.prototype.getClientRects = function getClientRects(this: Element) {
+    const visible = this.isConnected && (this as HTMLElement).style?.display !== "none";
+    const rects = visible ? [{ x: 0, y: 0, width: 100, height: 20, top: 0, left: 0, right: 100, bottom: 20 }] : [];
+    return Object.assign(rects, { item: (i: number) => rects[i] ?? null }) as unknown as DOMRectList;
+  };
+  Element.prototype.getBoundingClientRect = () =>
+    ({ x: 0, y: 0, width: 100, height: 20, top: 0, left: 0, right: 100, bottom: 20, toJSON: () => ({}) }) as DOMRect;
+  Object.defineProperty(HTMLElement.prototype, "innerText", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.textContent ?? "";
+    },
+  });
+  Element.prototype.scrollIntoView = () => {};
+}
+
+let api: WebbotApi;
+
+beforeEach(() => {
+  patchJsdom();
+  document.body.innerHTML = "";
+  api = installFromSource();
+});
+
+describe("instalacion", () => {
+  it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
+    expect(api.version).toBe(1);
+    expect(typeof api.click).toBe("function");
+  });
+
+  it("es idempotente", () => {
+    const first = (globalThis as { __webbot?: WebbotApi }).__webbot;
+    installWebbotRuntime();
+    expect((globalThis as { __webbot?: WebbotApi }).__webbot).toBe(first);
+  });
+});
+
+describe("click", () => {
+  it("hace clic en un boton localizado por texto", () => {
+    document.body.innerHTML = `<button id="b">Aceptar todo</button>`;
+    const spy = vi.fn();
+    document.getElementById("b")?.addEventListener("click", spy);
+
+    const result = api.click({ target: { text: "Aceptar" } }) as { clicked: { tag: string } };
+
+    expect(spy).toHaveBeenCalledOnce();
+    expect(result.clicked.tag).toBe("button");
+  });
+
+  it("sube del span al boton que lo contiene", () => {
+    document.body.innerHTML = `<button id="b"><span>Publicar</span></button>`;
+    const spy = vi.fn();
+    document.getElementById("b")?.addEventListener("click", spy);
+
+    const result = api.click({ target: { text: "Publicar" } }) as { clicked: { tag: string } };
+
+    expect(spy).toHaveBeenCalledOnce();
+    expect(result.clicked.tag).toBe("button");
+  });
+
+  it("encuentra el texto ignorando acentos y mayusculas", () => {
+    document.body.innerHTML = `<button>Publicación</button>`;
+    expect(() => api.click({ target: { text: "publicacion" } })).not.toThrow();
+  });
+
+  it("dispara pointerdown ademas de click, como esperan las UIs modernas", () => {
+    document.body.innerHTML = `<button id="b">Ir</button>`;
+    const orden: string[] = [];
+    const el = document.getElementById("b");
+    for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+      el?.addEventListener(type, () => orden.push(type));
+    }
+
+    api.click({ target: { css: "#b" } });
+
+    expect(orden).toEqual(["pointerdown", "mousedown", "mouseup", "click"]);
+  });
+
+  it("falla con element_not_found si no hay coincidencias", () => {
+    document.body.innerHTML = `<button>Otro</button>`;
+    try {
+      api.click({ target: { text: "No existe" } });
+      throw new Error("deberia haber lanzado");
+    } catch (error) {
+      expect((error as { webbotCode?: string }).webbotCode).toBe("element_not_found");
+    }
+  });
+
+  it("se niega a pulsar un elemento deshabilitado", () => {
+    document.body.innerHTML = `<button disabled>Enviar</button>`;
+    expect(() => api.click({ target: { text: "Enviar" } })).toThrow(/deshabilitado/i);
+  });
+});
+
+describe("type", () => {
+  it("escribe en un input y notifica el evento input", () => {
+    document.body.innerHTML = `<input id="q" value="viejo" />`;
+    const input = document.getElementById("q") as HTMLInputElement;
+    const spy = vi.fn();
+    input.addEventListener("input", spy);
+
+    api.type({ target: { css: "#q" }, text: "nuevo", clear: true });
+
+    expect(input.value).toBe("nuevo");
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("anade al final cuando clear es false", () => {
+    document.body.innerHTML = `<input id="q" value="hola " />`;
+    api.type({ target: { css: "#q" }, text: "mundo", clear: false });
+    expect((document.getElementById("q") as HTMLInputElement).value).toBe("hola mundo");
+  });
+
+  it("escribe en un contenteditable", () => {
+    document.body.innerHTML = `<div id="c" contenteditable="true"></div>`;
+    api.type({ target: { css: "#c" }, text: "un post", clear: true });
+    expect(document.getElementById("c")?.textContent).toBe("un post");
+  });
+
+  it("rechaza elementos que no admiten texto", () => {
+    document.body.innerHTML = `<p id="p">texto</p>`;
+    expect(() => api.type({ target: { css: "#p" }, text: "x" })).toThrow(/no admite escritura/i);
+  });
+});
+
+describe("extract", () => {
+  const PAGINA = `
+    <nav>menu de navegacion</nav>
+    <article>
+      <h1>Titular</h1>
+      <p>Primer parrafo del cuerpo con contenido suficiente para pasar el umbral de longitud del contenedor.</p>
+      <p>Segundo parrafo.</p>
+      <script>var basura = 1;</script>
+    </article>
+    <footer>pie de pagina</footer>`;
+
+  it("modo readable devuelve el texto del articulo y descarta nav, footer y scripts", () => {
+    document.body.innerHTML = PAGINA;
+    const result = api.extract({ mode: "readable" }) as { text: string; chars: number };
+
+    expect(result.text).toContain("Primer parrafo");
+    expect(result.text).toContain("Segundo parrafo");
+    expect(result.text).not.toContain("menu de navegacion");
+    expect(result.text).not.toContain("pie de pagina");
+    expect(result.text).not.toContain("basura");
+    expect(result.chars).toBeGreaterThan(0);
+  });
+
+  it("modo full incluye todo el texto visible", () => {
+    document.body.innerHTML = PAGINA;
+    const result = api.extract({ mode: "full" }) as { text: string };
+    expect(result.text).toContain("menu de navegacion");
+  });
+
+  it("respeta maxChars y lo senala", () => {
+    document.body.innerHTML = PAGINA;
+    const result = api.extract({ mode: "readable", maxChars: 10 }) as { text: string; truncated: boolean };
+    expect(result.text).toHaveLength(10);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("modo selectors lee campos, atributos y listas", () => {
+    document.body.innerHTML = `
+      <h1 class="t">Producto</h1>
+      <span class="price">19,90</span>
+      <a class="l" href="https://ejemplo.com/a">A</a>
+      <a class="l" href="https://ejemplo.com/b">B</a>`;
+
+    const result = api.extract({
+      mode: "selectors",
+      selectors: {
+        titulo: { css: ".t" },
+        precio: { css: ".price" },
+        enlaces: { css: ".l", attr: "href", all: true },
+      },
+    }) as { fields: Record<string, unknown> };
+
+    expect(result.fields.titulo).toBe("Producto");
+    expect(result.fields.precio).toBe("19,90");
+    expect(result.fields.enlaces).toEqual(["https://ejemplo.com/a", "https://ejemplo.com/b"]);
+  });
+
+  it("aplica el perfil del dominio y deja que los selectores de la llamada lo sobrescriban", () => {
+    document.body.innerHTML = `<h1 id="firstHeading">Del perfil</h1><span class="mio">Mio</span>`;
+
+    const result = api.extract({
+      mode: "selectors",
+      profile: { id: "wikipedia", match: ["wikipedia.org"], fields: { titulo: { css: "#firstHeading" } } },
+      selectors: { propio: { css: ".mio" } },
+    }) as { profile: string; fields: Record<string, unknown> };
+
+    expect(result.profile).toBe("wikipedia");
+    expect(result.fields.titulo).toBe("Del perfil");
+    expect(result.fields.propio).toBe("Mio");
+  });
+
+  it("exige selectores en modo selectors si no hay perfil", () => {
+    expect(() => api.extract({ mode: "selectors" })).toThrow(/necesita el parametro/i);
+  });
+});
+
+describe("links", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <a href="https://localhost/uno">Uno</a>
+      <a href="https://otro.com/dos">Dos</a>
+      <a href="https://localhost/uno">Duplicado</a>
+      <a href="#ancla">Ancla</a>`;
+  });
+
+  it("deduplica y descarta los enlaces que no son http", () => {
+    const result = api.links({}) as { links: { href: string }[] };
+    expect(result.links).toHaveLength(2);
+  });
+
+  it("filtra por subcadena", () => {
+    const result = api.links({ contains: "otro.com" }) as { links: { href: string }[] };
+    expect(result.links).toHaveLength(1);
+    expect(result.links[0]?.href).toContain("otro.com");
+  });
+});
+
+describe("outline", () => {
+  it("lista los elementos interactivos con rol y nombre accesible", () => {
+    document.body.innerHTML = `
+      <button aria-label="Cerrar dialogo"></button>
+      <a href="/x">Ir a X</a>
+      <input type="text" placeholder="Buscar" />
+      <div>texto suelto sin interaccion</div>`;
+
+    const result = api.outline({}) as { elements: { role: string; name: string }[] };
+    const roles = result.elements.map((el) => el.role);
+
+    expect(roles).toContain("button");
+    expect(roles).toContain("link");
+    expect(roles).toContain("textbox");
+    expect(result.elements.find((el) => el.role === "button")?.name).toBe("Cerrar dialogo");
+  });
+
+  it("respeta maxNodes", () => {
+    document.body.innerHTML = Array.from({ length: 30 }, (_, i) => `<button>B${i}</button>`).join("");
+    const result = api.outline({ maxNodes: 5 }) as { elements: unknown[] };
+    expect(result.elements).toHaveLength(5);
+  });
+});
+
+describe("waitFor", () => {
+  it("resuelve cuando el elemento aparece mas tarde", async () => {
+    setTimeout(() => {
+      document.body.innerHTML = `<div id="tarde">listo</div>`;
+    }, 100);
+
+    await expect(api.waitFor({ target: { css: "#tarde" }, timeoutMs: 2_000 })).resolves.toMatchObject({
+      found: { tag: "div" },
+    });
+  });
+
+  it("falla con element_not_found al agotar el tiempo", async () => {
+    await expect(api.waitFor({ target: { css: "#nunca" }, timeoutMs: 300 })).rejects.toMatchObject({
+      webbotCode: "element_not_found",
+    });
+  });
+});
+
+describe("postSocial", () => {
+  it("con dryRun rellena el composer de X pero no pulsa publicar", async () => {
+    document.body.innerHTML = `
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+    const spy = vi.fn();
+    document.querySelector('[data-testid="tweetButtonInline"]')?.addEventListener("click", spy);
+
+    const result = (await api.postSocial({ network: "x", text: "hola mundo", dryRun: true })) as {
+      posted: boolean;
+      dryRun: boolean;
+    };
+
+    expect(result.dryRun).toBe(true);
+    expect(result.posted).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="tweetTextarea_0"]')?.textContent).toBe("hola mundo");
+  });
+
+  it("sin dryRun pulsa el boton de publicar de X y confirma al vaciarse el composer", { timeout: 15_000 }, async () => {
+    document.body.innerHTML = `
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+    const spy = vi.fn();
+    // X vacia el cuadro de redaccion cuando el post sale: en eso se basa la confirmacion.
+    document.querySelector('[data-testid="tweetButtonInline"]')?.addEventListener("click", () => {
+      spy();
+      const composer = document.querySelector('[data-testid="tweetTextarea_0"]');
+      if (composer) composer.textContent = "";
+    });
+
+    const result = (await api.postSocial({ network: "x", text: "publicado", dryRun: false })) as {
+      posted: boolean;
+      confirmed: boolean;
+    };
+
+    expect(spy).toHaveBeenCalledOnce();
+    expect(result.posted).toBe(true);
+    expect(result.confirmed).toBe(true);
+  });
+
+  // Espera a que el boton se habilite antes de rendirse, asi que necesita mas margen que el resto.
+  it("no pulsa un boton deshabilitado y lo explica", { timeout: 15_000 }, async () => {
+    document.body.innerHTML = `
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button" aria-disabled="true">Postear</div>`;
+
+    await expect(api.postSocial({ network: "x", text: "x", dryRun: false })).rejects.toMatchObject({
+      webbotCode: "post_button_disabled",
+    });
+  });
+
+  it("avisa si no encuentra el composer de Facebook", async () => {
+    document.body.innerHTML = `<div>pagina sin composer</div>`;
+    await expect(api.postSocial({ network: "facebook", text: "hola", dryRun: true })).rejects.toMatchObject({
+      webbotCode: "composer_not_found",
+    });
+  });
+
+  it("abre el dialogo de Facebook y rellena el cuadro de texto", async () => {
+    document.body.innerHTML = `<div role="button" aria-label="¿Qué estás pensando?">abrir</div>`;
+    document.querySelector('[role="button"]')?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div role="dialog">
+           <div role="textbox" contenteditable="true"></div>
+           <div role="button" aria-label="Publicar">Publicar</div>
+         </div>`,
+      );
+    });
+
+    const result = (await api.postSocial({ network: "facebook", text: "desde webbot", dryRun: true })) as {
+      posted: boolean;
+    };
+
+    expect(result.posted).toBe(false);
+    expect(document.querySelector('[role="dialog"] [role="textbox"]')?.textContent).toBe("desde webbot");
+  });
+});

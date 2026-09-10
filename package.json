@@ -1,0 +1,27 @@
+{
+  "name": "webbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Extension de Chrome (MV3) controlable por agentes IA via MCP: extraccion de texto, automatizacion de clics y publicacion en redes sociales.",
+  "engines": { "node": ">=20" },
+  "workspaces": ["packages/shared", "packages/server", "packages/extension"],
+  "scripts": {
+    "dev": "npm run dev --workspace @webbot/extension",
+    "build": "npm run build --workspace @webbot/extension",
+    "mcp": "npm run mcp --workspace @webbot/server",
+    "mcp:http": "npm run http --workspace @webbot/server",
+    "cli": "npm run cli --workspace @webbot/server --",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "verify": "npm run typecheck && npm test && npm run build && npm run check:bundle"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "jsdom": "^29.1.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  }
+}

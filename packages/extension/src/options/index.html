@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Opciones de Webbot</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #18181b;
+        --muted: #71717a;
+        --bg: #ffffff;
+        --panel: #fafafa;
+        --border: #e4e4e7;
+        --accent: #2563eb;
+        --warn: #b45309;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #f4f4f5;
+          --muted: #a1a1aa;
+          --bg: #18181b;
+          --panel: #27272a;
+          --border: #3f3f46;
+          --accent: #60a5fa;
+          --warn: #fbbf24;
+        }
+      }
+      body {
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 28px 20px 60px;
+        font: 14px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px;
+      }
+      .sub {
+        color: var(--muted);
+        margin: 0 0 24px;
+      }
+      fieldset {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+        margin: 0 0 18px;
+        background: var(--panel);
+      }
+      legend {
+        font-weight: 600;
+        padding: 0 6px;
+      }
+      label {
+        display: block;
+        font-weight: 500;
+        margin: 12px 0 4px;
+      }
+      label:first-of-type {
+        margin-top: 0;
+      }
+      input,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 7px 9px;
+        font: inherit;
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        font-size: 13px;
+        color: var(--fg);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+        margin: 4px 0 0;
+      }
+      .warn {
+        color: var(--warn);
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        position: sticky;
+        bottom: 0;
+        padding: 12px 0;
+        background: var(--bg);
+      }
+      button {
+        padding: 8px 16px;
+        font: inherit;
+        font-weight: 500;
+        color: #fff;
+        background: var(--accent);
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button.secondary {
+        color: var(--fg);
+        background: transparent;
+        border: 1px solid var(--border);
+      }
+      #status {
+        color: var(--muted);
+      }
+      code {
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        font-size: 12px;
+        background: var(--panel);
+        padding: 1px 4px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Webbot</h1>
+    <p class="sub">Extension controlada por un agente IA a traves del servidor MCP.</p>
+
+    <fieldset>
+      <legend>Conexion con el servidor</legend>
+      <label for="token">Token compartido</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="el mismo valor que WEBBOT_TOKEN" />
+      <p class="hint">
+        Debe coincidir exactamente con <code>WEBBOT_TOKEN</code> del fichero <code>.env</code> del servidor.
+        Sin el, el puente rechaza la conexion.
+      </p>
+
+      <label for="port">Puerto del puente</label>
+      <input id="port" type="number" min="1" max="65535" />
+      <p class="hint">Igual que <code>WEBBOT_BRIDGE_PORT</code>. Por defecto 8790.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Dominios permitidos</legend>
+      <label for="allowlist">Un dominio por linea</label>
+      <textarea id="allowlist" spellcheck="false"></textarea>
+      <p class="hint">
+        El agente solo puede leer o actuar en estos dominios; los subdominios se incluyen solos
+        (<code>github.com</code> cubre <code>gist.github.com</code>).
+        <span class="warn">Escribe <code>*</code> en una linea para permitir cualquier sitio, con lo que el agente
+        podra actuar sobre cualquier pestana abierta.</span>
+      </p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Flujos guardados</legend>
+      <label for="flows">JSON de flujos</label>
+      <textarea id="flows" spellcheck="false"></textarea>
+      <p class="hint">
+        Formato: <code>{"nombre": {"description": "...", "steps": [...]}}</code>. Los textos admiten
+        marcadores <code>{{variable}}</code> que el agente rellena al invocar el flujo.
+      </p>
+    </fieldset>
+
+    <div class="bar">
+      <button id="save">Guardar</button>
+      <button id="reset" class="secondary">Restaurar valores por defecto</button>
+      <span id="status"></span>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

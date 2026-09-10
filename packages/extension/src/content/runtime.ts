@@ -52,9 +52,11 @@ export function installWebbotRuntime(): void {
         /crear publicaci[oó]n/i,
         /create post/i,
       ],
-      dialog: ['[role="dialog"]'],
       composer: ['div[role="textbox"][contenteditable="true"]', '[data-lexical-editor="true"]'],
       postButtonNames: [/^publicar$/i, /^post$/i, /^compartir$/i, /^share$/i],
+      // Facebook parte la publicacion en dos pantallas: el composer acaba en "Siguiente" y
+      // "Publicar" vive en el dialogo de configuracion que viene despues.
+      nextStepNames: [/^siguiente$/i, /^next$/i],
     },
   };
 
@@ -531,7 +533,6 @@ export function installWebbotRuntime(): void {
   }
 
   async function postToFacebook(text: string, dryRun: boolean): Promise<Record<string, unknown>> {
-    let dialog: ParentNode = document;
     let composer = firstMatching(SOCIAL.facebook.composer);
 
     if (!composer) {
@@ -542,40 +543,80 @@ export function installWebbotRuntime(): void {
         });
       }
       dispatchClick(opener);
-      const found = await until(() => {
-        const dlg = firstMatching(SOCIAL.facebook.dialog);
-        const box = firstMatching(SOCIAL.facebook.composer, dlg ?? document);
-        return box ? { dlg, box } : null;
-      }, 10_000);
-      if (!found) {
+      composer = await until(() => firstMatching(SOCIAL.facebook.composer), 10_000);
+      if (!composer) {
         throw Object.assign(new Error("El dialogo de publicacion de Facebook no llego a abrirse."), {
           webbotCode: "composer_not_found",
         });
       }
-      dialog = found.dlg ?? document;
-      composer = found.box;
     }
 
     await writeComposer(composer, text, 600);
+    // Se describe el composer AQUI: si hay que avanzar de pantalla, Facebook se lleva el texto a
+    // su propio estado y el elemento queda oculto y vacio, que es una foto enganosa del dryRun.
+    const composerAtWrite = describeElement(composer);
 
-    const button = await until(() => {
-      const el = buttonByName(SOCIAL.facebook.postButtonNames, dialog);
+    /**
+     * El ambito de busqueda del boton sale del composer hacia arriba, nunca de un
+     * querySelector('[role=dialog]') global: el primer dialogo de la pagina puede ser cualquier
+     * otro panel abierto (notificaciones, chat). Buscarlo asi acababa mirando en el dialogo
+     * equivocado o, si ninguno estaba abierto todavia, en el documento entero.
+     */
+    const dialogEl = composer.closest('[role="dialog"]');
+    const scope: ParentNode = dialogEl ?? composer.closest("form") ?? document;
+
+    const publishIn = (root: ParentNode): Element | null => {
+      const el = buttonByName(SOCIAL.facebook.postButtonNames, root);
       if (!el) return null;
       return el.getAttribute("aria-disabled") === "true" ? null : el;
-    }, 6_000);
+    };
+
+    let button = await until(() => publishIn(scope), 4_000);
+
+    /**
+     * Si el composer acaba en "Siguiente", "Publicar" vive en la pantalla de configuracion que
+     * viene detras. Se avanza y se busca alli, recorriendo los dialogos abiertos porque el nuevo
+     * no es el que contenia el composer.
+     */
+    let advancedStep = false;
+    if (!button) {
+      const next = buttonByName(SOCIAL.facebook.nextStepNames, scope);
+      if (next) {
+        dispatchClick(next);
+        advancedStep = true;
+        button = await until(() => {
+          for (const dlg of Array.from(document.querySelectorAll('[role="dialog"]'))) {
+            const el = publishIn(dlg);
+            if (el) return el;
+          }
+          return null;
+        }, 8_000);
+      }
+    }
 
     if (!button) {
-      throw Object.assign(new Error("El boton 'Publicar' de Facebook no aparecio habilitado tras escribir el texto."), {
-        webbotCode: "post_button_disabled",
-      });
+      throw Object.assign(
+        new Error(
+          advancedStep
+            ? "No aparecio un boton 'Publicar' habilitado en Facebook ni tras avanzar con 'Siguiente'."
+            : "El boton 'Publicar' de Facebook no aparecio habilitado tras escribir el texto.",
+        ),
+        { webbotCode: "post_button_disabled" },
+      );
     }
 
     if (dryRun) {
-      return { network: "facebook", dryRun: true, posted: false, composer: describeElement(composer), button: describeElement(button), text };
+      return { network: "facebook", dryRun: true, posted: false, advancedStep, composer: composerAtWrite, button: describeElement(button), text };
     }
 
     dispatchClick(button);
-    const closed = await until(() => (firstMatching(SOCIAL.facebook.dialog) ? null : true), 15_000);
+    // Se confirma con el dialogo que contenia ESTE composer, o con que el composer se vacie
+    // cuando no habia dialogo. Antes bastaba con que hubiera cualquier otro panel abierto para
+    // que la confirmacion no llegara nunca.
+    const closed = await until(() => {
+      if (dialogEl) return dialogEl.isConnected ? null : true;
+      return composer.isConnected && rawText(composer).length > 0 ? null : true;
+    }, 15_000);
 
     return { network: "facebook", dryRun: false, posted: true, confirmed: closed === true, url: location.href, text };
   }

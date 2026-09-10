@@ -376,6 +376,48 @@ describe("postSocial", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("busca el boton de Facebook en el dialogo del composer, no en otro panel abierto", async () => {
+    // El panel de notificaciones va primero en el DOM y trae su propio 'Publicar' como senuelo:
+    // buscar el dialogo con un querySelector global se quedaba con este.
+    document.body.innerHTML = `
+      <div role="dialog" aria-label="Notificaciones">
+        <div role="button" data-testid="senuelo">Publicar</div>
+      </div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="real">Publicar</div>
+      </div>`;
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as {
+      button: { selector: string };
+    };
+
+    expect(result.button.selector).toBe('[data-testid="real"]');
+  });
+
+  it("avanza a la pantalla de configuracion cuando el composer de Facebook acaba en 'Siguiente'", async () => {
+    // Facebook partio la publicacion en dos pantallas: el composer ya no trae 'Publicar'.
+    document.body.innerHTML = `
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="siguiente">Siguiente</div>
+      </div>`;
+    document.querySelector('[data-testid="siguiente"]')?.addEventListener("click", () => {
+      const ajustes = document.createElement("div");
+      ajustes.setAttribute("role", "dialog");
+      ajustes.innerHTML = `<div role="button" data-testid="publicar">Publicar</div>`;
+      document.body.append(ajustes);
+    });
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as {
+      advancedStep: boolean;
+      button: { selector: string };
+    };
+
+    expect(result.advancedStep).toBe(true);
+    expect(result.button.selector).toBe('[data-testid="publicar"]');
+  });
+
   it("avisa si no encuentra el composer de Facebook", async () => {
     document.body.innerHTML = `<div>pagina sin composer</div>`;
     await expect(api.postSocial({ network: "facebook", text: "hola", dryRun: true })).rejects.toMatchObject({

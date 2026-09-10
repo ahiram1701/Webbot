@@ -26,6 +26,7 @@ COPY packages/server ./packages/server
 # Dentro del contenedor el puente escucha en todas las interfaces; docker-compose lo publica solo
 # en 127.0.0.1 del host, asi que sigue sin quedar expuesto a la red local.
 ENV WEBBOT_BRIDGE_HOST=0.0.0.0 \
+    WEBBOT_HTTP_HOST=0.0.0.0 \
     WEBBOT_BRIDGE_PORT=8790 \
     WEBBOT_HTTP_PORT=8791
 

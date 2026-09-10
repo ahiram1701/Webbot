@@ -49,8 +49,11 @@ async function main(): Promise<void> {
   app.get("/mcp", methodNotAllowed);
   app.delete("/mcp", methodNotAllowed);
 
-  app.listen(config.httpPort, () => {
-    log(`MCP por HTTP en http://127.0.0.1:${config.httpPort}/mcp`);
+  app.listen(config.httpPort, config.httpHost, () => {
+    log(`MCP por HTTP en http://${config.httpHost}:${config.httpPort}/mcp`);
+    if (config.httpHost !== "127.0.0.1" && config.httpHost !== "localhost") {
+      log(`AVISO: /mcp escucha en ${config.httpHost} y no pide token. Publicalo solo en loopback.`);
+    }
   });
 }
 

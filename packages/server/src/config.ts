@@ -43,6 +43,12 @@ export const config = {
   bridgePort: intFromEnv("WEBBOT_BRIDGE_PORT", DEFAULT_BRIDGE_PORT),
   bridgeHost: process.env.WEBBOT_BRIDGE_HOST?.trim() || "127.0.0.1",
   httpPort: intFromEnv("WEBBOT_HTTP_PORT", DEFAULT_HTTP_PORT),
+  /**
+   * El endpoint /mcp no pide token: quien lo alcanza, conduce el navegador. Por eso el
+   * transporte HTTP escucha solo en loopback salvo que se pida lo contrario, y lo unico que
+   * lo pide es el contenedor, donde docker-compose publica los puertos ya atados a 127.0.0.1.
+   */
+  httpHost: process.env.WEBBOT_HTTP_HOST?.trim() || "127.0.0.1",
   requestTimeoutMs: intFromEnv("WEBBOT_REQUEST_TIMEOUT_MS", 30_000),
 };
 

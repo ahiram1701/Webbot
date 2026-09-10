@@ -148,7 +148,10 @@ principio de `packages/extension/src/content/runtime.ts`. Arreglarlo es editar e
 ## Seguridad
 
 - **Token compartido**: el puente compara en tiempo constante y rechaza cualquier conexión sin él.
-- **Solo loopback**: el WebSocket escucha en `127.0.0.1`.
+- **Solo loopback**: tanto el WebSocket del puente como el endpoint `/mcp` escuchan en
+  `127.0.0.1`. Importa sobre todo en el segundo: `/mcp` no pide token, así que exponerlo en
+  otra interfaz deja tu navegador a merced de cualquiera en la red. `WEBBOT_HTTP_HOST` solo se
+  cambia dentro del contenedor, donde compose publica los puertos ya atados al loopback del host.
 - **Allowlist de dominios**: es el límite real de lo que un agente puede tocar. Los subdominios
   entran solos (`github.com` cubre `gist.github.com`), y el match es por etiquetas completas, así
   que `github.com` no habilita `evilgithub.com`. Poner `*` desactiva el filtro.

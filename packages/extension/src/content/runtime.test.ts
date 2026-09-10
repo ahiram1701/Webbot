@@ -339,6 +339,43 @@ describe("postSocial", () => {
     });
   });
 
+  it("limpia el texto que el editor duplica en el DOM antes de seguir", async () => {
+    // Reproduce lo visto en X: execCommand inserta de forma nativa y Draft.js ademas renderiza su
+    // propio span[data-text], asi que el DOM acaba con el texto dos veces y textContent lo suma.
+    document.body.innerHTML = `
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+    const composer = document.querySelector('[data-testid="tweetTextarea_0"]') as HTMLElement;
+    composer.addEventListener("input", () => {
+      if (composer.querySelector("[data-text]")) return;
+      const propio = document.createElement("span");
+      propio.setAttribute("data-text", "true");
+      propio.textContent = composer.textContent ?? "";
+      composer.append(propio);
+    });
+
+    const result = (await api.postSocial({ network: "x", text: "alfa", dryRun: true })) as { posted: boolean };
+
+    expect(result.posted).toBe(false);
+    expect(composer.textContent).toBe("alfa");
+  });
+
+  it("no publica si el composer acaba con un texto distinto del pedido", { timeout: 15_000 }, async () => {
+    document.body.innerHTML = `
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+    const composer = document.querySelector('[data-testid="tweetTextarea_0"]') as HTMLElement;
+    const spy = vi.fn();
+    document.querySelector('[data-testid="tweetButtonInline"]')?.addEventListener("click", spy);
+    // Un editor que mete texto de su cosecha y que nadie reconoce como suyo.
+    composer.addEventListener("input", () => { composer.textContent = (composer.textContent ?? "") + " y algo mas"; });
+
+    await expect(api.postSocial({ network: "x", text: "solo esto", dryRun: false })).rejects.toMatchObject({
+      webbotCode: "composer_text_mismatch",
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("avisa si no encuentra el composer de Facebook", async () => {
     document.body.innerHTML = `<div>pagina sin composer</div>`;
     await expect(api.postSocial({ network: "facebook", text: "hola", dryRun: true })).rejects.toMatchObject({

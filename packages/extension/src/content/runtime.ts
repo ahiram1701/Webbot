@@ -316,6 +316,67 @@ export function installWebbotRuntime(): void {
     throw new Error(`El elemento <${el.tagName.toLowerCase()}> no admite escritura de texto.`);
   }
 
+  /**
+   * Editores con framework detras marcan como suyos los nodos de texto que salen de su modelo:
+   * Draft.js (X) con data-text, Lexical (Facebook) con data-lexical-text.
+   */
+  const MANAGED_TEXT_SELECTOR = '[data-text="true"], [data-lexical-text="true"]';
+
+  /** Texto colapsado tal cual esta en el DOM. No usa innerText a proposito: jsdom no lo implementa. */
+  function rawText(el: Element): string {
+    return (el.textContent ?? "").replace(/s+/g, " ").trim();
+  }
+
+  /** Lo que el editor reconoce como suyo, o null si no marca sus nodos. */
+  function managedText(el: Element): string | null {
+    const nodes = el.querySelectorAll(MANAGED_TEXT_SELECTOR);
+    if (nodes.length === 0) return null;
+    let out = "";
+    for (const node of nodes) out += node.textContent ?? "";
+    return out.replace(/s+/g, " ").trim();
+  }
+
+  /**
+   * Borra los nodos de texto que el editor no reconoce como suyos. execCommand("insertText")
+   * inserta de forma nativa y el editor ademas renderiza el suyo desde el modelo: en el composer
+   * de X eso deja el texto duplicado en el DOM (un nodo suelto junto al span con data-text).
+   */
+  function dropStrayText(el: Element): void {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const strays: Text[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = (node as Text).parentElement;
+      if (parent && !parent.closest(MANAGED_TEXT_SELECTOR)) strays.push(node as Text);
+    }
+    for (const stray of strays) stray.remove();
+  }
+
+  /**
+   * Escribe en el composer y NO SIGUE si lo que quedo dentro no es lo que se pidio. Publicar un
+   * texto distinto del que pidio el agente no tiene vuelta atras, asi que ante la duda se falla.
+   */
+  async function writeComposer(composer: Element, text: string, settleMs: number): Promise<void> {
+    const wanted = text.replace(/s+/g, " ").trim();
+    setText(composer, text, true);
+    await sleep(settleMs);
+    if (rawText(composer) === wanted) return;
+
+    // Si el modelo del editor si tiene el texto correcto, lo que sobra es basura en el DOM.
+    if (managedText(composer) === wanted) {
+      dropStrayText(composer);
+      await sleep(120);
+      if (rawText(composer) === wanted) return;
+    }
+
+    throw Object.assign(
+      new Error(
+        "El composer quedo con un texto distinto del pedido, asi que no se publica nada. Pedido: " +
+          JSON.stringify(wanted) + ". Quedo: " + JSON.stringify(rawText(composer).slice(0, 200)) + ".",
+      ),
+      { webbotCode: "composer_text_mismatch" },
+    );
+  }
+
   function textFrom(root: Element, removeSelectors: string[]): string {
     const skip = new Set<Element>();
     for (const selector of removeSelectors) {
@@ -442,8 +503,7 @@ export function installWebbotRuntime(): void {
       });
     }
 
-    setText(composer, text, true);
-    await sleep(400);
+    await writeComposer(composer, text, 400);
 
     const button = await until(() => {
       const el = firstMatching(SOCIAL.x.postButton) ?? buttonByName(SOCIAL.x.postButtonNames);
@@ -496,8 +556,7 @@ export function installWebbotRuntime(): void {
       composer = found.box;
     }
 
-    setText(composer, text, true);
-    await sleep(600);
+    await writeComposer(composer, text, 600);
 
     const button = await until(() => {
       const el = buttonByName(SOCIAL.facebook.postButtonNames, dialog);

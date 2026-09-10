@@ -59,7 +59,8 @@ npm run mcp
 El popup de la extensión debe pasar a **Conectado** y el icono mostrar el distintivo `ON`.
 
 **6. Regístralo en tu agente.** Copia `.mcp.json.example` a `.mcp.json` (o pega su contenido en la
-configuración de Claude Desktop) ajustando `cwd` y el token.
+configuración de Claude Desktop) y ajusta `cwd` a la ruta del repo. El token no se repite ahí: el
+servidor lo lee del `.env` de la raíz, y así no acaba en un archivo que se pueda commitear.
 
 Durante el desarrollo, `npm run dev` levanta Vite con recarga en caliente; la extensión se recarga
 sola al guardar.

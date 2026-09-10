@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+# Registro local del servidor MCP: lleva la ruta absoluta de cada maquina.
+.mcp.json
 *.log
 .DS_Store
 packages/extension/.vite/

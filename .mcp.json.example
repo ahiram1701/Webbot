@@ -3,10 +3,7 @@
     "webbot": {
       "command": "npx",
       "args": ["tsx", "packages/server/src/stdio.ts"],
-      "cwd": "C:/Github/Webbot",
-      "env": {
-        "WEBBOT_TOKEN": "el-mismo-token-que-pusiste-en-opciones-de-la-extension"
-      }
+      "cwd": "C:/Github/Webbot"
     }
   }
 }

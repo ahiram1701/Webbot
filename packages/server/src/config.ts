@@ -1,8 +1,18 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { config as loadEnv } from "dotenv";
 
 import { DEFAULT_BRIDGE_PORT, DEFAULT_HTTP_PORT } from "@webbot/shared";
 
-loadEnv();
+/**
+ * Los scripts de npm workspaces corren con cwd en packages/server, asi que el .env de la raiz del
+ * repo queda fuera del alcance por defecto de dotenv. Se prueban los dos: primero el del directorio
+ * desde el que se invoco (util en Docker o al lanzar desde otro sitio) y luego el de la raiz. El
+ * primero que defina una clave gana, y dotenv nunca pisa lo que ya venga en process.env.
+ */
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+loadEnv({ path: [path.resolve(process.cwd(), ".env"), path.join(repoRoot, ".env")] });
 
 function intFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];

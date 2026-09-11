@@ -44,12 +44,41 @@ let api: WebbotApi;
 beforeEach(() => {
   patchJsdom();
   document.body.innerHTML = "";
+  // Algunos tests sustituyen execCommand para imitar a un editor concreto.
+  delete (document as { execCommand?: unknown }).execCommand;
   api = installFromSource();
 });
 
+/**
+ * Imita lo medido con Lexical real: ignora la seleccion que un script fija con un Range y solo
+ * actua sobre la suya, la que crea al recibir Ctrl+A. execCommand("delete") dice que si pero no
+ * hace nada, igual que sobre Lexical.
+ */
+function editorTipoLexical(contenido: string): { el: HTMLElement; exec: ReturnType<typeof vi.fn> } {
+  document.body.innerHTML = `<div id="lx" data-lexical-editor="true" contenteditable="true" role="textbox">${contenido}</div>`;
+  const el = document.getElementById("lx") as HTMLElement;
+  let todoSeleccionado = false;
+  el.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "a") todoSeleccionado = true;
+  });
+  el.addEventListener("beforeinput", (event) => {
+    event.preventDefault();
+    if (event.inputType === "deleteContentBackward" && todoSeleccionado) el.textContent = "";
+  });
+  const exec = vi.fn((command: string, _ui: boolean, value: string) => {
+    if (command === "insertText") {
+      el.textContent = todoSeleccionado ? value : `${value}${el.textContent ?? ""}`;
+      todoSeleccionado = false;
+    }
+    return true;
+  });
+  Object.defineProperty(document, "execCommand", { configurable: true, value: exec });
+  return { el, exec };
+}
+
 describe("instalacion", () => {
   it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
-    expect(api.version).toBe(3);
+    expect(api.version).toBe(4);
     expect(typeof api.click).toBe("function");
   });
 
@@ -166,6 +195,24 @@ describe("type", () => {
     document.body.innerHTML = `<div id="c" contenteditable="true">borrador guardado</div>`;
     api.type({ target: { css: "#c" }, text: "", clear: true });
     expect(document.getElementById("c")?.textContent).toBe("");
+  });
+
+  it("vacia un editor Lexical con su propio seleccionar todo, no con la seleccion del DOM", async () => {
+    const { el, exec } = editorTipoLexical("probando webbot");
+
+    await api.type({ target: { css: "#lx" }, text: "", clear: true });
+
+    expect(el.textContent).toBe("");
+    expect(exec).not.toHaveBeenCalledWith("delete", false, "");
+  });
+
+  it("reescribe un editor Lexical con borrador sin duplicar el texto", async () => {
+    // Con la seleccion del DOM, insertText sobre el borrador de Lexical real dejaba "alfaalfa".
+    const { el } = editorTipoLexical("probando webbot");
+
+    await api.type({ target: { css: "#lx" }, text: "alfa", clear: true });
+
+    expect(el.textContent).toBe("alfa");
   });
 
   it("rechaza elementos que no admiten texto", () => {
@@ -540,6 +587,21 @@ describe("postSocial", () => {
 
     expect(result.advancedStep).toBe(true);
     expect(result.button.selector).toBe('[data-testid="publicar"]');
+  });
+
+  it("escribe en el composer de Facebook sobre un borrador guardado sin duplicarlo", async () => {
+    // Facebook guarda el borrador al cerrar el dialogo y lo recupera al reabrirlo.
+    const { el } = editorTipoLexical("probando webbot");
+    const dialogo = document.createElement("div");
+    dialogo.setAttribute("role", "dialog");
+    el.replaceWith(dialogo);
+    dialogo.append(el);
+    dialogo.insertAdjacentHTML("beforeend", `<div role="button" data-testid="publicar">Publicar</div>`);
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as { posted: boolean };
+
+    expect(result.posted).toBe(false);
+    expect(el.textContent).toBe("hola");
   });
 
   it("avisa si no encuentra el composer de Facebook", async () => {

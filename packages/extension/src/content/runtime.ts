@@ -27,7 +27,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 3;
+export const RUNTIME_VERSION = 4;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -40,7 +40,7 @@ export const RUNTIME_VERSION = 3;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 3;
+  const RUNTIME_VERSION_INNER = 4;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -323,9 +323,9 @@ export function installWebbotRuntime(): void {
 
       if (clear && text === "") {
         // insertText con cadena vacia devuelve true en Chrome pero no borra la seleccion: vaciar es
-        // borrar. "delete" dispara el beforeinput de borrado que Draft.js y Lexical si atienden. Si
-        // Chrome dice que borro, no se toca el DOM a mano: vaciarlo por detras del editor dejaria su
-        // modelo con el texto, y es el modelo lo que se publica.
+        // borrar. Lexical no pasa por aqui, porque ignora la seleccion hecha por script (ver
+        // setLexicalText). Si Chrome dice que borro, no se toca el DOM a mano: vaciarlo por detras
+        // de un editor dejaria su modelo con el texto, y es el modelo lo que se publica.
         const deleted = typeof exec === "function" ? exec.call(document, "delete", false, "") : false;
         if (!deleted) {
           el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, composed: true, cancelable: true, inputType: "deleteContentBackward" }));
@@ -346,6 +346,48 @@ export function installWebbotRuntime(): void {
     }
 
     throw new Error(`El elemento <${el.tagName.toLowerCase()}> no admite escritura de texto.`);
+  }
+
+  /** Raiz de un editor Lexical (el composer de Facebook), o null si el elemento no esta en uno. */
+  function lexicalRoot(el: Element): HTMLElement | null {
+    const root = el.closest('[data-lexical-editor="true"]');
+    return root instanceof HTMLElement ? root : null;
+  }
+
+  /**
+   * Reemplaza TODO el contenido de un editor Lexical. Lexical ignora la seleccion que se fija por
+   * script con un Range: medido con Lexical real, borrar tras seleccionar asi no hace nada, e
+   * insertText sobre un borrador duplica el texto y parte el modelo en parrafos. Lo que si funciona
+   * es pedirle a Lexical que seleccione todo con su propio atajo (Ctrl+A, o Cmd+A en Apple, la misma
+   * regla que usa Lexical) y actuar despues sobre esa seleccion. Funciona tambien sin foco.
+   */
+  async function setLexicalText(root: HTMLElement, text: string): Promise<void> {
+    root.focus({ preventScroll: true });
+    const apple = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+    const selectAll = {
+      key: "a", code: "KeyA", keyCode: 65, which: 65,
+      bubbles: true, cancelable: true, composed: true,
+      ctrlKey: !apple, metaKey: apple,
+    };
+    root.dispatchEvent(new KeyboardEvent("keydown", selectAll));
+    root.dispatchEvent(new KeyboardEvent("keyup", selectAll));
+    await sleep(60);
+
+    if (text === "") {
+      root.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, composed: true, cancelable: true, inputType: "deleteContentBackward" }));
+      await sleep(60);
+      return;
+    }
+
+    const exec = (document as { execCommand?: (name: string, ui: boolean, value: string) => boolean }).execCommand;
+    const inserted = typeof exec === "function" ? exec.call(document, "insertText", false, text) : false;
+    if (!inserted && typeof DataTransfer === "function" && typeof ClipboardEvent === "function") {
+      // Pegar es la otra via que Lexical atiende sobre su propia seleccion.
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      root.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, composed: true, clipboardData: data }));
+    }
+    await sleep(60);
   }
 
   /**
@@ -389,7 +431,9 @@ export function installWebbotRuntime(): void {
    */
   async function writeComposer(composer: Element, text: string, settleMs: number): Promise<void> {
     const wanted = text.replace(/\s+/g, " ").trim();
-    setText(composer, text, true);
+    const lexical = lexicalRoot(composer);
+    if (lexical) await setLexicalText(lexical, text);
+    else setText(composer, text, true);
     await sleep(settleMs);
     if (rawText(composer) === wanted) return;
 
@@ -840,16 +884,23 @@ export function installWebbotRuntime(): void {
     type({ target, text, clear, submit }) {
       const el = findOne(target);
       el.scrollIntoView({ block: "center" });
+      const finish = () => {
+        if (submit) {
+          const init = { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 };
+          el.dispatchEvent(new KeyboardEvent("keydown", init));
+          el.dispatchEvent(new KeyboardEvent("keypress", init));
+          el.dispatchEvent(new KeyboardEvent("keyup", init));
+          if (el instanceof HTMLInputElement) el.form?.requestSubmit?.();
+        }
+        const value = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : visibleText(el);
+        return { typed: describeElement(el), value: value.slice(0, 500), submitted: Boolean(submit) };
+      };
+      // Lexical necesita esperar a su propio "seleccionar todo", asi que ese camino es asincrono. El
+      // resto sigue siendo sincrono, y un elemento que no admite texto falla en el acto.
+      const lexical = (clear ?? true) ? lexicalRoot(el) : null;
+      if (lexical) return setLexicalText(lexical, text).then(finish);
       setText(el, text, clear ?? true);
-      if (submit) {
-        const init = { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 };
-        el.dispatchEvent(new KeyboardEvent("keydown", init));
-        el.dispatchEvent(new KeyboardEvent("keypress", init));
-        el.dispatchEvent(new KeyboardEvent("keyup", init));
-        if (el instanceof HTMLInputElement) el.form?.requestSubmit?.();
-      }
-      const value = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : visibleText(el);
-      return { typed: describeElement(el), value: value.slice(0, 500), submitted: Boolean(submit) };
+      return finish();
     },
 
     scroll({ direction, amount }) {

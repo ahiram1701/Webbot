@@ -78,7 +78,7 @@ function editorTipoLexical(contenido: string): { el: HTMLElement; exec: ReturnTy
 
 describe("instalacion", () => {
   it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
-    expect(api.version).toBe(5);
+    expect(api.version).toBe(6);
     expect(typeof api.click).toBe("function");
   });
 
@@ -665,6 +665,53 @@ describe("postSocial", () => {
     await expect(
       api.postSocial({ network: "facebook", text: "hola", dryRun: false, expectedAccount: "Ahiram SG" }),
     ).rejects.toMatchObject({ webbotCode: "account_mismatch" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("abre el composer aunque el boton muestre un borrador en vez del saludo", async () => {
+    // Medido en vivo: con un borrador guardado, el boton del feed pone "xd" y el unico botón sin
+    // aria-label de la tarjeta es ese.
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="main">
+        <div id="tarjeta">
+          <div role="button" id="abrir">xd</div>
+          <div role="button" aria-label="Foto/video">foto</div>
+          <div role="button" aria-label="Reel">reel</div>
+        </div>
+      </div>`;
+    document.getElementById("abrir")?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div role="dialog" aria-label="Crear publicacion">
+           <div role="textbox" contenteditable="true">xd</div>
+           <div role="button" data-testid="publicar">Publicar</div>
+         </div>`,
+      );
+    });
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as { account: string };
+
+    expect(result.account).toBe("Ahiram SG");
+    expect(document.querySelector('[role="dialog"] [role="textbox"]')?.textContent).toBe("hola");
+  });
+
+  it("no pulsa nada si hay varios candidatos a abrir el composer", async () => {
+    document.body.innerHTML = `
+      <div role="main">
+        <div id="tarjeta">
+          <div role="button" id="uno">xd</div>
+          <div role="button" id="otro">otro boton sin etiqueta</div>
+          <div role="button" aria-label="Foto/video">foto</div>
+        </div>
+      </div>`;
+    const spy = vi.fn();
+    document.getElementById("uno")?.addEventListener("click", spy);
+    document.getElementById("otro")?.addEventListener("click", spy);
+
+    await expect(api.postSocial({ network: "facebook", text: "hola", dryRun: true })).rejects.toMatchObject({
+      webbotCode: "composer_not_found",
+    });
     expect(spy).not.toHaveBeenCalled();
   });
 

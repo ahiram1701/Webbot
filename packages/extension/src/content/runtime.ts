@@ -27,7 +27,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 5;
+export const RUNTIME_VERSION = 6;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -40,7 +40,7 @@ export const RUNTIME_VERSION = 5;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 5;
+  const RUNTIME_VERSION_INNER = 6;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -64,6 +64,9 @@ export function installWebbotRuntime(): void {
         /crear publicaci[oó]n/i,
         /create post/i,
       ],
+      // Botones fijos de la tarjeta del composer. Sirven de ancla cuando el boton que la abre
+      // muestra un borrador guardado en vez del saludo.
+      composerCardNames: [/^foto\/video$/i, /^photo\/video$/i, /^video en vivo$/i, /^live video$/i, /^reel$/i],
       composer: ['div[role="textbox"][contenteditable="true"]', '[data-lexical-editor="true"]'],
       postButtonNames: [/^publicar$/i, /^post$/i, /^compartir$/i, /^share$/i],
       // Facebook parte la publicacion en dos pantallas: el composer acaba en "Siguiente" y
@@ -733,6 +736,31 @@ export function installWebbotRuntime(): void {
     return { network: "x", dryRun: false, posted: true, confirmed: cleared === true, account, url: location.href, text };
   }
 
+  /**
+   * El boton que abre el cuadro de publicacion del feed. Normalmente su texto es el saludo, pero
+   * cuando Facebook guarda un borrador pasa a mostrar el borrador, y buscarlo por texto deja de
+   * funcionar. El respaldo se ancla en los botones fijos de la tarjeta (Foto/video, Reel, Video en
+   * vivo) y sube buscando el unico boton sin aria-label y con texto que hay dentro: si hubiera mas
+   * de un candidato no se devuelve ninguno, porque pulsar a ciegas en el feed no es aceptable.
+   */
+  function facebookComposerOpener(): Element | null {
+    const byName = buttonByName(SOCIAL.facebook.openComposerNames);
+    if (byName) return byName;
+
+    const anchor = buttonByName(SOCIAL.facebook.composerCardNames);
+    if (!anchor) return null;
+
+    let node: Element | null = anchor.parentElement;
+    for (let depth = 0; node && depth < 6; depth += 1, node = node.parentElement) {
+      const candidates = Array.from(node.querySelectorAll('[role="button"]')).filter(
+        (el) => isVisible(el) && !el.hasAttribute("aria-label") && !el.contains(anchor) && visibleText(el).trim().length > 0,
+      );
+      if (candidates.length === 1) return candidates[0] ?? null;
+      if (candidates.length > 1) return null;
+    }
+    return null;
+  }
+
   async function postToFacebook(text: string, options: PostOptions): Promise<Record<string, unknown>> {
     const names = facebookAccountNames();
     const accountAliases = [names.saludo, names.barra].filter((name): name is string => Boolean(name));
@@ -742,11 +770,15 @@ export function installWebbotRuntime(): void {
     let composer = firstMatching(SOCIAL.facebook.composer);
 
     if (!composer) {
-      const opener = buttonByName(SOCIAL.facebook.openComposerNames);
+      const opener = facebookComposerOpener();
       if (!opener) {
-        throw Object.assign(new Error("No se encontro el cuadro 'Que estas pensando' de Facebook. Abre facebook.com con la sesion iniciada."), {
-          webbotCode: "composer_not_found",
-        });
+        throw Object.assign(
+          new Error(
+            "No se encontro el boton que abre el cuadro de publicacion de Facebook. Comprueba que estas en facebook.com " +
+              "con la sesion iniciada.",
+          ),
+          { webbotCode: "composer_not_found" },
+        );
       }
       dispatchClick(opener);
       composer = await until(() => firstMatching(SOCIAL.facebook.composer), 10_000);

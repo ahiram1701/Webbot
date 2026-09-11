@@ -19,7 +19,7 @@ Uso: npm run cli -- <comando> [args]
   links <tabId> [contiene]      Lista los enlaces
   click <tabId> <texto>         Hace clic en el elemento cuyo texto coincida
   type <tabId> <css> <texto>    Escribe en el campo indicado
-  post <x|facebook> <texto>     Publica (simulado; anade --real para publicar de verdad)
+  post <x|facebook> <texto>     Simula y muestra la cuenta activa; --real --as <cuenta> publica
 `.trim();
 
 function parseCommand(argv: string[]): Command | null {
@@ -53,10 +53,19 @@ function parseCommand(argv: string[]): Command | null {
     case "post": {
       const network = rest[0];
       if (network !== "x" && network !== "facebook") throw new Error("La red debe ser 'x' o 'facebook'.");
-      const real = rest.includes("--real");
-      const text = rest.slice(1).filter((arg) => arg !== "--real").join(" ");
+      const args = rest.slice(1);
+      const real = args.includes("--real");
+      const asIndex = args.indexOf("--as");
+      const expectedAccount = asIndex >= 0 ? args[asIndex + 1] : undefined;
+      if (asIndex >= 0 && !expectedAccount) throw new Error("Falta la cuenta tras --as.");
+      if (real && !expectedAccount) {
+        throw new Error("Para publicar de verdad indica la cuenta con --as. Lanza antes el simulado: muestra la cuenta activa.");
+      }
+      const text = args
+        .filter((arg, i) => arg !== "--real" && (asIndex < 0 || (i !== asIndex && i !== asIndex + 1)))
+        .join(" ");
       if (!text) throw new Error("Falta el texto del post.");
-      return { type: "social.post", network, text, dryRun: !real };
+      return { type: "social.post", network, text, dryRun: !real, expectedAccount };
     }
     default:
       return null;

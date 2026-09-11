@@ -28,6 +28,23 @@ async function openTab(url: string, active: boolean, allowlist: string[]): Promi
   return tab;
 }
 
+export interface CommandContext {
+  /** Instante (Date.now) a partir del cual el servidor ya no espera la respuesta. */
+  deadlineAt: number;
+}
+
+/**
+ * Pone la pestana y su ventana en primer plano. Una pagina en segundo plano o en una ventana
+ * tapada tiene los temporizadores congelados o racionados: un flujo de publicacion se queda a
+ * medias y puede reanudarse minutos despues, cuando nadie espera ya el resultado.
+ */
+async function focusTab(tabId: number): Promise<void> {
+  const tab = await chrome.tabs.update(tabId, { active: true });
+  if (tab?.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true });
+  // Margen para que la pagina reciba visibilitychange antes de pedirle nada.
+  await sleep(300);
+}
+
 /** Busca una pestana ya abierta en la red social; si no hay, abre una. */
 async function tabForNetwork(network: "x" | "facebook", allowlist: string[]): Promise<number> {
   const { hosts, url } = SOCIAL_HOME[network];
@@ -58,6 +75,7 @@ async function runFlowStep(
   step: FlowStep,
   state: { tabId: number | null; results: Record<string, unknown> },
   settings: WebbotSettings,
+  context: CommandContext,
 ): Promise<unknown> {
   const needTab = (): number => {
     if (state.tabId === null) {
@@ -118,7 +136,14 @@ async function runFlowStep(
     case "post": {
       const tabId = await tabForNetwork(step.network, settings.allowlist);
       state.tabId = tabId;
-      return callRuntime(tabId, "postSocial", { network: step.network, text: step.text, dryRun: step.dryRun });
+      await focusTab(tabId);
+      return callRuntime(tabId, "postSocial", {
+        network: step.network,
+        text: step.text,
+        dryRun: step.dryRun,
+        expectedAccount: step.expectedAccount,
+        deadlineAt: context.deadlineAt,
+      });
     }
     case "wait":
       await sleep(step.ms);
@@ -131,7 +156,7 @@ async function runFlowStep(
 }
 
 /** Ejecuta un comando del agente. Cada rama valida permisos antes de tocar la pagina. */
-export async function runCommand(command: Command): Promise<unknown> {
+export async function runCommand(command: Command, context: CommandContext): Promise<unknown> {
   const settings = await getSettings();
 
   switch (command.type) {
@@ -229,10 +254,13 @@ export async function runCommand(command: Command): Promise<unknown> {
 
     case "social.post": {
       const tabId = await tabForNetwork(command.network, settings.allowlist);
+      await focusTab(tabId);
       return callRuntime(tabId, "postSocial", {
         network: command.network,
         text: command.text,
         dryRun: command.dryRun ?? false,
+        expectedAccount: command.expectedAccount,
+        deadlineAt: context.deadlineAt,
       });
     }
 
@@ -266,7 +294,7 @@ export async function runCommand(command: Command): Promise<unknown> {
       for (const [index, rawStep] of flow.steps.entries()) {
         const step = interpolateStep(rawStep, command.vars);
         try {
-          steps.push({ index, do: step.do, ok: true, result: await runFlowStep(step, state, settings) });
+          steps.push({ index, do: step.do, ok: true, result: await runFlowStep(step, state, settings, context) });
         } catch (error) {
           steps.push({ index, do: step.do, ok: false, error: error instanceof Error ? error.message : String(error) });
           return { flow: command.name, completed: false, failedAt: index, steps, named: state.results };

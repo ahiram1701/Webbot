@@ -32,7 +32,13 @@ export const FlowStepSchema = z.discriminatedUnion("do", [
     selectors: z.record(z.string(), FieldSpecSchema).optional(),
     as: z.string().optional().describe("Nombre con el que devolver este resultado."),
   }),
-  z.object({ do: z.literal("post"), network: NetworkSchema, text: z.string(), dryRun: z.boolean().optional() }),
+  z.object({
+    do: z.literal("post"),
+    network: NetworkSchema,
+    text: z.string(),
+    dryRun: z.boolean().optional(),
+    expectedAccount: z.string().optional().describe("Obligatorio para publicar de verdad: cuenta con la que debe salir."),
+  }),
   z.object({ do: z.literal("wait"), ms: z.number().int().min(0).max(60_000) }),
 ]);
 export type FlowStep = z.infer<typeof FlowStepSchema>;

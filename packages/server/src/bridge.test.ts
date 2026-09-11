@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ErrorCodes, PROTOCOL_VERSION, type Frame } from "@webbot/shared";
+import { ErrorCodes, PROTOCOL_VERSION, SOCIAL_POST_TIMEOUT_MS, type Frame } from "@webbot/shared";
 
 import { Bridge } from "./bridge.js";
 
@@ -133,6 +133,24 @@ describe("Bridge", () => {
     const ws = await connectFakeExtension(target, { version: PROTOCOL_VERSION + 99 });
     const code = await new Promise<number>((resolve) => ws.on("close", resolve));
     expect(code).toBe(4400);
+  });
+
+  it("manda el plazo con la peticion y da mas margen a lo que puede publicar", async () => {
+    const target = await startBridge(1_000);
+    const plazos: Record<string, number | undefined> = {};
+    await connectFakeExtension(target, {
+      onRequest: (frame, ws) => {
+        plazos[frame.command.type] = frame.timeoutMs;
+        ws.send(JSON.stringify({ kind: "response", id: frame.id, ok: true, result: {} } satisfies Frame));
+      },
+    });
+    await waitForConnected(target);
+
+    await target.send({ type: "browser.listTabs" });
+    await target.send({ type: "social.post", network: "x", text: "hola", dryRun: true });
+
+    expect(plazos["browser.listTabs"]).toBe(1_000);
+    expect(plazos["social.post"]).toBe(SOCIAL_POST_TIMEOUT_MS);
   });
 
   it("agota el tiempo si la extension no contesta", async () => {

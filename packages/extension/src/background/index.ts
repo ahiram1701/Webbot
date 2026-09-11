@@ -40,9 +40,14 @@ function send(frame: Frame): void {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
 }
 
+/** Margen para que la respuesta llegue al servidor antes de que salte su temporizador. */
+const DEADLINE_MARGIN_MS = 2_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 async function handleRequest(frame: Extract<Frame, { kind: "request" }>): Promise<void> {
   try {
-    const result = await runCommand(frame.command);
+    const deadlineAt = Date.now() + (frame.timeoutMs ?? DEFAULT_TIMEOUT_MS) - DEADLINE_MARGIN_MS;
+    const result = await runCommand(frame.command, { deadlineAt });
     send({ kind: "response", id: frame.id, ok: true, result });
     await appendLog({ at: Date.now(), command: frame.command.type, ok: true });
   } catch (error) {

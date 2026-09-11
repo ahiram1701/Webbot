@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 
 import { WebSocketServer, type WebSocket } from "ws";
 
-import { ErrorCodes, FrameSchema, PROTOCOL_VERSION, type Command, type Frame } from "@webbot/shared";
+import { ErrorCodes, FrameSchema, PROTOCOL_VERSION, timeoutFor, type Command, type Frame } from "@webbot/shared";
 
 import { log } from "./config.js";
 
@@ -89,19 +89,22 @@ export class Bridge {
     }
 
     const id = randomUUID();
+    const timeoutMs = timeoutFor(command, this.options.requestTimeoutMs);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(
           new BridgeError(
-            `La extension no respondio a '${command.type}' en ${this.options.requestTimeoutMs} ms.`,
+            `La extension no respondio a '${command.type}' en ${timeoutMs} ms.`,
             ErrorCodes.TIMEOUT,
           ),
         );
-      }, this.options.requestTimeoutMs);
+      }, timeoutMs);
 
       this.pending.set(id, { resolve, reject, timer });
-      socket.send(JSON.stringify({ kind: "request", id, command } satisfies Frame));
+      // El plazo viaja con la peticion: la extension no ejecuta una accion irreversible despues de
+      // que aqui ya se haya dado por perdida.
+      socket.send(JSON.stringify({ kind: "request", id, command, timeoutMs } satisfies Frame));
     });
   }
 

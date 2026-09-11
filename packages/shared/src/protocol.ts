@@ -1,7 +1,12 @@
 import { z } from "zod";
 
-/** Version del protocolo del puente. La extension y el servidor deben coincidir. */
-export const PROTOCOL_VERSION = 1;
+/**
+ * Version del protocolo del puente. La extension y el servidor deben coincidir.
+ *
+ * v2: social.post exige expectedAccount para publicar y las peticiones llevan su plazo. Se subio
+ * para que una extension sin recargar, que ignoraria ambas protecciones, no llegue a conectarse.
+ */
+export const PROTOCOL_VERSION = 2;
 export const DEFAULT_BRIDGE_PORT = 8790;
 export const DEFAULT_HTTP_PORT = 8791;
 
@@ -82,7 +87,13 @@ export const CommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("page.screenshot"), tabId }),
 
-  z.object({ type: z.literal("social.post"), network: NetworkSchema, text: z.string().min(1), dryRun: z.boolean().optional() }),
+  z.object({
+    type: z.literal("social.post"),
+    network: NetworkSchema,
+    text: z.string().min(1),
+    dryRun: z.boolean().optional(),
+    expectedAccount: z.string().min(1).optional(),
+  }),
 
   z.object({ type: z.literal("flow.list") }),
   z.object({ type: z.literal("flow.run"), name: z.string(), vars: z.record(z.string(), z.string()).optional() }),
@@ -106,7 +117,17 @@ export const FrameSchema = z.discriminatedUnion("kind", [
   /** servidor -> extension, acepta el hello. */
   z.object({ kind: z.literal("welcome"), version: z.number().int() }),
   /** servidor -> extension. */
-  z.object({ kind: z.literal("request"), id: z.string(), command: CommandSchema }),
+  z.object({
+    kind: z.literal("request"),
+    id: z.string(),
+    command: CommandSchema,
+    /**
+     * Cuanto va a esperar el servidor. La extension lo convierte en un plazo limite para que una
+     * accion irreversible que llegue tarde (pestana congelada, pagina lenta) se aborte en vez de
+     * ejecutarse cuando ya nadie espera la respuesta.
+     */
+    timeoutMs: z.number().int().positive().optional(),
+  }),
   /** extension -> servidor. */
   z.object({
     kind: z.literal("response"),
@@ -133,5 +154,22 @@ export const ErrorCodes = {
   TAB_NOT_FOUND: "tab_not_found",
   COMPOSER_NOT_FOUND: "composer_not_found",
   POST_BUTTON_DISABLED: "post_button_disabled",
+  COMPOSER_TEXT_MISMATCH: "composer_text_mismatch",
+  ACCOUNT_REQUIRED: "account_required",
+  ACCOUNT_MISMATCH: "account_mismatch",
+  TAB_HIDDEN: "tab_hidden",
+  DEADLINE_EXCEEDED: "deadline_exceeded",
   BAD_REQUEST: "bad_request",
 } as const;
+
+/**
+ * Publicar en Facebook encadena abrir el dialogo, escribir, avanzar de pantalla y confirmar: en el
+ * peor caso pasa de los 30 s del timeout general. Los comandos que pueden publicar esperan mas.
+ */
+export const SOCIAL_POST_TIMEOUT_MS = 90_000;
+
+/** Plazo que el servidor concede a un comando. */
+export function timeoutFor(command: Command, baseMs: number): number {
+  const canPost = command.type === "social.post" || command.type === "flow.run";
+  return canPost ? Math.max(baseMs, SOCIAL_POST_TIMEOUT_MS) : baseMs;
+}

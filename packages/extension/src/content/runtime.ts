@@ -16,10 +16,18 @@ export interface WebbotApi {
   type(options: { target: Target; text: string; clear?: boolean; submit?: boolean }): unknown;
   scroll(options: { direction: "up" | "down" | "top" | "bottom"; amount?: number }): unknown;
   waitFor(options: { target: Target; timeoutMs?: number }): Promise<unknown>;
-  postSocial(options: { network: Network; text: string; dryRun?: boolean }): Promise<unknown>;
+  postSocial(options: {
+    network: Network;
+    text: string;
+    dryRun?: boolean;
+    /** Obligatoria para publicar de verdad: si la cuenta activa no coincide, no se toca nada. */
+    expectedAccount?: string;
+    /** Date.now() a partir del cual nadie espera ya la respuesta: despues no se pulsa Publicar. */
+    deadlineAt?: number;
+  }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 1;
+export const RUNTIME_VERSION = 2;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -30,7 +38,9 @@ export const RUNTIME_VERSION = 1;
  * autonomia de la funcion.
  */
 export function installWebbotRuntime(): void {
-  const RUNTIME_VERSION_INNER = 1;
+  // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
+  // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
+  const RUNTIME_VERSION_INNER = 2;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -44,6 +54,8 @@ export function installWebbotRuntime(): void {
       openComposer: ['[data-testid="SideNav_NewTweet_Button"]', 'a[href="/compose/post"]', 'a[href="/compose/tweet"]'],
       postButton: ['[data-testid="tweetButtonInline"]', '[data-testid="tweetButton"]'],
       postButtonNames: [/^postear$/i, /^publicar$/i, /^post$/i, /^tweet$/i, /^twittear$/i],
+      // El enlace a "Perfil" de la barra lateral lleva el @usuario de la sesion activa.
+      accountLink: '[data-testid="AppTabBar_Profile_Link"]',
     },
     facebook: {
       openComposerNames: [
@@ -57,6 +69,9 @@ export function installWebbotRuntime(): void {
       // Facebook parte la publicacion en dos pantallas: el composer acaba en "Siguiente" y
       // "Publicar" vive en el dialogo de configuracion que viene despues.
       nextStepNames: [/^siguiente$/i, /^next$/i],
+      // El composer saluda a quien publica: "¿Qué estás pensando, Impulsa CV?". Si la sesion actua
+      // como una pagina, ese nombre es el de la pagina y no el del perfil personal.
+      accountInPrompt: [/pensando,\s*(.+?)\s*\?\s*$/i, /on your mind,\s*(.+?)\s*\?\s*$/i],
     },
   };
 
@@ -326,7 +341,7 @@ export function installWebbotRuntime(): void {
 
   /** Texto colapsado tal cual esta en el DOM. No usa innerText a proposito: jsdom no lo implementa. */
   function rawText(el: Element): string {
-    return (el.textContent ?? "").replace(/s+/g, " ").trim();
+    return (el.textContent ?? "").replace(/\s+/g, " ").trim();
   }
 
   /** Lo que el editor reconoce como suyo, o null si no marca sus nodos. */
@@ -335,7 +350,7 @@ export function installWebbotRuntime(): void {
     if (nodes.length === 0) return null;
     let out = "";
     for (const node of nodes) out += node.textContent ?? "";
-    return out.replace(/s+/g, " ").trim();
+    return out.replace(/\s+/g, " ").trim();
   }
 
   /**
@@ -358,7 +373,7 @@ export function installWebbotRuntime(): void {
    * texto distinto del que pidio el agente no tiene vuelta atras, asi que ante la duda se falla.
    */
   async function writeComposer(composer: Element, text: string, settleMs: number): Promise<void> {
-    const wanted = text.replace(/s+/g, " ").trim();
+    const wanted = text.replace(/\s+/g, " ").trim();
     setText(composer, text, true);
     await sleep(settleMs);
     if (rawText(composer) === wanted) return;
@@ -490,7 +505,81 @@ export function installWebbotRuntime(): void {
   // Adaptadores de redes sociales
   // -------------------------------------------------------------------------
 
-  async function postToX(text: string, dryRun: boolean): Promise<Record<string, unknown>> {
+  type PostOptions = { dryRun: boolean; expectedAccount?: string; deadlineAt?: number };
+
+  /** Quita la arroba y normaliza, para que "@Ahiram1701" y "ahiram1701" sean la misma cuenta. */
+  function accountKey(value: string): string {
+    return norm(value).replace(/^@/, "");
+  }
+
+  function xAccount(): string | null {
+    const href = document.querySelector(SOCIAL.x.accountLink)?.getAttribute("href") ?? "";
+    let path = href;
+    try {
+      path = new URL(href, location.href).pathname;
+    } catch {
+      // href vacio o raro: se usa tal cual.
+    }
+    const handle = path.split("/").filter(Boolean)[0];
+    return handle ? `@${handle}` : null;
+  }
+
+  function facebookAccount(): string | null {
+    for (const el of Array.from(document.querySelectorAll('[role="button"], [role="textbox"], [aria-placeholder]'))) {
+      if (!isVisible(el)) continue;
+      for (const candidate of [el.getAttribute("aria-placeholder") ?? "", accessibleName(el)]) {
+        for (const pattern of SOCIAL.facebook.accountInPrompt) {
+          const match = candidate.trim().match(pattern);
+          if (match?.[1]) return match[1].trim();
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Publicar exige decir con que cuenta, y se comprueba ANTES de escribir nada: una sesion de
+   * Facebook que actua como pagina publicaria en nombre de la pagina sin avisar.
+   */
+  function checkAccount(detected: string | null, options: PostOptions): void {
+    if (!options.dryRun && !options.expectedAccount) {
+      throw Object.assign(
+        new Error(
+          "Para publicar de verdad hay que indicar expectedAccount. Lanza antes un dryRun: devuelve en 'account' " +
+            "la cuenta activa" + (detected ? ` (ahora: ${JSON.stringify(detected)}).` : "."),
+        ),
+        { webbotCode: "account_required" },
+      );
+    }
+    if (!options.expectedAccount) return;
+    if (!detected) {
+      throw Object.assign(new Error("No se pudo determinar con que cuenta se publicaria, asi que no se publica nada."), {
+        webbotCode: "account_mismatch",
+      });
+    }
+    if (accountKey(detected) !== accountKey(options.expectedAccount)) {
+      throw Object.assign(
+        new Error(
+          `La cuenta activa es ${JSON.stringify(detected)}, no ${JSON.stringify(options.expectedAccount)}. No se ha tocado nada.`,
+        ),
+        { webbotCode: "account_mismatch" },
+      );
+    }
+  }
+
+  /** Ultima comprobacion antes del unico clic que no tiene vuelta atras. */
+  function checkDeadline(options: PostOptions): void {
+    if (options.deadlineAt === undefined || Date.now() <= options.deadlineAt) return;
+    throw Object.assign(
+      new Error("Se agoto el plazo antes de pulsar Publicar: el servidor ya no esperaba la respuesta. No se ha publicado nada."),
+      { webbotCode: "deadline_exceeded" },
+    );
+  }
+
+  async function postToX(text: string, options: PostOptions): Promise<Record<string, unknown>> {
+    const account = xAccount();
+    checkAccount(account, options);
+
     let composer = firstMatching(SOCIAL.x.composer);
     if (!composer) {
       const opener = firstMatching(SOCIAL.x.openComposer);
@@ -519,20 +608,24 @@ export function installWebbotRuntime(): void {
       });
     }
 
-    if (dryRun) {
-      return { network: "x", dryRun: true, posted: false, composer: describeElement(composer), button: describeElement(button), text };
+    if (options.dryRun) {
+      return { network: "x", dryRun: true, posted: false, account, composer: describeElement(composer), button: describeElement(button), text };
     }
 
+    checkDeadline(options);
     dispatchClick(button);
     const cleared = await until(() => {
       const current = firstMatching(SOCIAL.x.composer);
       return !current || visibleText(current).length === 0 ? true : null;
     }, 10_000);
 
-    return { network: "x", dryRun: false, posted: true, confirmed: cleared === true, url: location.href, text };
+    return { network: "x", dryRun: false, posted: true, confirmed: cleared === true, account, url: location.href, text };
   }
 
-  async function postToFacebook(text: string, dryRun: boolean): Promise<Record<string, unknown>> {
+  async function postToFacebook(text: string, options: PostOptions): Promise<Record<string, unknown>> {
+    const account = facebookAccount();
+    checkAccount(account, options);
+
     let composer = firstMatching(SOCIAL.facebook.composer);
 
     if (!composer) {
@@ -605,10 +698,11 @@ export function installWebbotRuntime(): void {
       );
     }
 
-    if (dryRun) {
-      return { network: "facebook", dryRun: true, posted: false, advancedStep, composer: composerAtWrite, button: describeElement(button), text };
+    if (options.dryRun) {
+      return { network: "facebook", dryRun: true, posted: false, account, advancedStep, composer: composerAtWrite, button: describeElement(button), text };
     }
 
+    checkDeadline(options);
     dispatchClick(button);
     // Se confirma con el dialogo que contenia ESTE composer, o con que el composer se vacie
     // cuando no habia dialogo. Antes bastaba con que hubiera cualquier otro panel abierto para
@@ -618,7 +712,7 @@ export function installWebbotRuntime(): void {
       return composer.isConnected && rawText(composer).length > 0 ? null : true;
     }, 15_000);
 
-    return { network: "facebook", dryRun: false, posted: true, confirmed: closed === true, url: location.href, text };
+    return { network: "facebook", dryRun: false, posted: true, confirmed: closed === true, account, url: location.href, text };
   }
 
   // -------------------------------------------------------------------------
@@ -764,8 +858,16 @@ export function installWebbotRuntime(): void {
       return { found: describeElement(found), url: location.href };
     },
 
-    async postSocial({ network, text, dryRun }) {
-      return network === "x" ? postToX(text, dryRun ?? false) : postToFacebook(text, dryRun ?? false);
+    async postSocial({ network, text, dryRun, expectedAccount, deadlineAt }) {
+      // Una pagina oculta tiene los temporizadores congelados: el flujo avanzaria a trompicones y
+      // podria llegar a Publicar cuando ya nadie espera. Mejor no empezar.
+      if (document.visibilityState === "hidden") {
+        throw Object.assign(new Error("La pestana de la red social no esta visible. Traela al primer plano y reintenta."), {
+          webbotCode: "tab_hidden",
+        });
+      }
+      const options: PostOptions = { dryRun: dryRun ?? false, expectedAccount, deadlineAt };
+      return network === "x" ? postToX(text, options) : postToFacebook(text, options);
     },
   };
 

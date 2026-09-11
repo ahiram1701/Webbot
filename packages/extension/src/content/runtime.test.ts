@@ -49,7 +49,7 @@ beforeEach(() => {
 
 describe("instalacion", () => {
   it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
-    expect(api.version).toBe(1);
+    expect(api.version).toBe(2);
     expect(typeof api.click).toBe("function");
   });
 
@@ -308,6 +308,7 @@ describe("postSocial", () => {
 
   it("sin dryRun pulsa el boton de publicar de X y confirma al vaciarse el composer", { timeout: 15_000 }, async () => {
     document.body.innerHTML = `
+      <a data-testid="AppTabBar_Profile_Link" href="/ahiram1701">Perfil</a>
       <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
       <div data-testid="tweetButtonInline" role="button">Postear</div>`;
     const spy = vi.fn();
@@ -318,7 +319,7 @@ describe("postSocial", () => {
       if (composer) composer.textContent = "";
     });
 
-    const result = (await api.postSocial({ network: "x", text: "publicado", dryRun: false })) as {
+    const result = (await api.postSocial({ network: "x", text: "publicado", dryRun: false, expectedAccount: "@ahiram1701" })) as {
       posted: boolean;
       confirmed: boolean;
     };
@@ -332,9 +333,10 @@ describe("postSocial", () => {
   it("no pulsa un boton deshabilitado y lo explica", { timeout: 15_000 }, async () => {
     document.body.innerHTML = `
       <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
-      <div data-testid="tweetButtonInline" role="button" aria-disabled="true">Postear</div>`;
+      <div data-testid="tweetButtonInline" role="button" aria-disabled="true">Postear</div>
+      <a data-testid="AppTabBar_Profile_Link" href="/ahiram1701">Perfil</a>`;
 
-    await expect(api.postSocial({ network: "x", text: "x", dryRun: false })).rejects.toMatchObject({
+    await expect(api.postSocial({ network: "x", text: "x", dryRun: false, expectedAccount: "@ahiram1701" })).rejects.toMatchObject({
       webbotCode: "post_button_disabled",
     });
   });
@@ -368,12 +370,108 @@ describe("postSocial", () => {
     const spy = vi.fn();
     document.querySelector('[data-testid="tweetButtonInline"]')?.addEventListener("click", spy);
     // Un editor que mete texto de su cosecha y que nadie reconoce como suyo.
+    document.body.insertAdjacentHTML("beforeend", '<a data-testid="AppTabBar_Profile_Link" href="/ahiram1701">Perfil</a>');
     composer.addEventListener("input", () => { composer.textContent = (composer.textContent ?? "") + " y algo mas"; });
 
-    await expect(api.postSocial({ network: "x", text: "solo esto", dryRun: false })).rejects.toMatchObject({
+    await expect(api.postSocial({ network: "x", text: "solo esto", dryRun: false, expectedAccount: "@ahiram1701" })).rejects.toMatchObject({
       webbotCode: "composer_text_mismatch",
     });
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("da por bueno el texto aunque el editor guarde los espacios a su manera", async () => {
+    // Las regex de normalizacion perdieron la barra invertida (/s+/ en vez de \s+) y dejaron de
+    // colapsar espacios. Como cambiaban cada "s" por un espacio en los dos lados de la comparacion,
+    // eso por si solo no rompia nada; lo que fallaba era cualquier texto cuyos espacios guarde el
+    // editor de otra forma, como hace un contenteditable con los espacios repetidos (&nbsp;).
+    document.body.innerHTML = `
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+    const composer = document.querySelector('[data-testid="tweetTextarea_0"]') as HTMLElement;
+    composer.addEventListener("input", () => {
+      composer.textContent = (composer.textContent ?? "").replace(/ {2,}/g, (run) => "\u00a0".repeat(run.length));
+    });
+
+    const result = (await api.postSocial({ network: "x", text: "esto   es una  prueba", dryRun: true })) as {
+      posted: boolean;
+    };
+
+    expect(result.posted).toBe(false);
+  });
+
+  it("no publica sin expectedAccount, y ni siquiera escribe", async () => {
+    document.body.innerHTML = `
+      <a data-testid="AppTabBar_Profile_Link" href="/ahiram1701">Perfil</a>
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+    const spy = vi.fn();
+    document.querySelector('[data-testid="tweetButtonInline"]')?.addEventListener("click", spy);
+
+    await expect(api.postSocial({ network: "x", text: "hola", dryRun: false })).rejects.toMatchObject({
+      webbotCode: "account_required",
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="tweetTextarea_0"]')?.textContent).toBe("");
+  });
+
+  it("aborta sin escribir si la cuenta activa de X no es la esperada", async () => {
+    document.body.innerHTML = `
+      <a data-testid="AppTabBar_Profile_Link" href="https://x.com/otra_cuenta">Perfil</a>
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+    const spy = vi.fn();
+    document.querySelector('[data-testid="tweetButtonInline"]')?.addEventListener("click", spy);
+
+    await expect(
+      api.postSocial({ network: "x", text: "hola", dryRun: false, expectedAccount: "@ahiram1701" }),
+    ).rejects.toMatchObject({ webbotCode: "account_mismatch" });
+    expect(spy).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="tweetTextarea_0"]')?.textContent).toBe("");
+  });
+
+  it("detecta que Facebook actua como una pagina y no publica con otra cuenta", async () => {
+    // Lo visto en vivo: el composer saludaba a la pagina "Impulsa CV", no al perfil personal.
+    document.body.innerHTML = `
+      <div role="button">¿Qué estás pensando, Impulsa CV?</div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="publicar">Publicar</div>
+      </div>`;
+    const spy = vi.fn();
+    document.querySelector('[data-testid="publicar"]')?.addEventListener("click", spy);
+
+    const simulado = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as { account: string };
+    expect(simulado.account).toBe("Impulsa CV");
+
+    await expect(
+      api.postSocial({ network: "facebook", text: "hola", dryRun: false, expectedAccount: "Ahiram" }),
+    ).rejects.toMatchObject({ webbotCode: "account_mismatch" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("no pulsa Publicar si el plazo del servidor ya paso", async () => {
+    document.body.innerHTML = `
+      <a data-testid="AppTabBar_Profile_Link" href="/ahiram1701">Perfil</a>
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+    const spy = vi.fn();
+    document.querySelector('[data-testid="tweetButtonInline"]')?.addEventListener("click", spy);
+
+    await expect(
+      api.postSocial({ network: "x", text: "hola", dryRun: false, expectedAccount: "@ahiram1701", deadlineAt: Date.now() - 1 }),
+    ).rejects.toMatchObject({ webbotCode: "deadline_exceeded" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("se niega a empezar si la pestana no esta visible", async () => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    try {
+      await expect(api.postSocial({ network: "x", text: "hola", dryRun: true })).rejects.toMatchObject({
+        webbotCode: "tab_hidden",
+      });
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+    }
   });
 
   it("busca el boton de Facebook en el dialogo del composer, no en otro panel abierto", async () => {

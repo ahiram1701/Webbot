@@ -25,7 +25,7 @@ const INSTRUCTIONS = [
   "webbot_outline es la herramienta clave antes de interactuar: devuelve roles, textos y un selector sugerido por elemento. No adivines selectores, miralos primero.",
   "Los targets aceptan css, xpath, text, role o name y se combinan como AND; usa 'index' para desempatar.",
   "webbot_extract aplica automaticamente un perfil por dominio si existe; el campo 'selectors' de la llamada lo sobrescribe.",
-  "webbot_post_social PUBLICA DE VERDAD en la cuenta que el usuario tenga abierta, sin confirmacion. Usa dryRun:true para validar los selectores primero, y pide permiso al usuario antes de publicar en real.",
+  "webbot_post_social PUBLICA DE VERDAD, sin confirmacion. Haz siempre primero dryRun:true: devuelve en 'account' la cuenta con la que se publicaria (en Facebook puede ser una pagina y no el perfil). Confirma esa cuenta y el texto con el usuario, y solo entonces publica con dryRun:false pasando expectedAccount; sin el, o si no coincide, la publicacion se aborta sin tocar nada.",
   "Solo se puede actuar sobre dominios de la allowlist configurada en la extension; si un comando falla con domain_blocked, el usuario debe anadir el dominio en Opciones.",
 ].join(" ");
 
@@ -209,15 +209,25 @@ export function createWebbotMcpServer(bridge: Bridge): McpServer {
         "Publica un post en Facebook o X usando la sesion ya iniciada en el navegador del usuario. " +
         "PUBLICA DE VERDAD Y SIN CONFIRMACION: es una accion publica e irreversible sobre la cuenta real. " +
         "Pide permiso explicito al usuario antes de llamarla con dryRun:false. " +
-        "Con dryRun:true rellena el composer, localiza el boton de publicar y se detiene sin pulsarlo: " +
-        "usalo siempre la primera vez para verificar que los selectores siguen vigentes.",
+        "Con dryRun:true rellena el composer, localiza el boton de publicar y se detiene sin pulsarlo, " +
+        "devolviendo en 'account' la cuenta activa: usalo siempre antes de publicar. " +
+        "Trae la pestana de la red al primer plano, porque en segundo plano Chrome congela la pagina.",
       inputSchema: {
         network: NetworkSchema,
         text: z.string().min(1).describe("Texto del post. En X el limite practico son 280 caracteres."),
         dryRun: z.boolean().optional().describe("true = simula sin pulsar Publicar. Por defecto false."),
+        expectedAccount: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Obligatorio con dryRun:false. Cuenta con la que debe salir el post, tal como la devolvio el dryRun en " +
+              "'account': '@usuario' en X, nombre visible del perfil o pagina en Facebook. Si no coincide, se aborta.",
+          ),
       },
     },
-    ({ network, text, dryRun }) => run({ type: "social.post", network, text, dryRun }),
+    ({ network, text, dryRun, expectedAccount }) =>
+      run({ type: "social.post", network, text, dryRun, expectedAccount }),
   );
 
   // ---- Flujos guardados ----

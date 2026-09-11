@@ -133,10 +133,23 @@ textos admiten marcadores `{{variable}}`:
 ## Publicación en redes sociales
 
 `webbot_post_social` escribe en el composer de Facebook o X y pulsa **Publicar**, sin pedir
-confirmación. Publica de verdad, en la cuenta que tengas abierta, y no se puede deshacer.
+confirmación. Publica de verdad y no se puede deshacer.
 
-**Usa `dryRun: true` la primera vez y después de cada cambio de UI de la plataforma.** Rellena el
-cuadro de texto, localiza el botón y se detiene sin pulsarlo, devolviéndote qué habría pulsado.
+**El orden es siempre `dryRun` → confirmar la cuenta → publicar.** Con `dryRun: true` rellena el
+cuadro de texto, localiza el botón y se detiene sin pulsarlo, devolviendo en `account` la cuenta con
+la que saldría el post. Para publicar de verdad hay que pasar esa cuenta en `expectedAccount`
+(`@usuario` en X, nombre visible en Facebook): sin ella, o si no coincide, se aborta antes de
+escribir nada. Importa sobre todo en Facebook, donde la sesión puede estar actuando como una página
+en lugar de como tu perfil.
+
+Otras dos protecciones que conviene conocer:
+
+- **Primer plano.** Antes de empezar trae al frente la pestaña de la red y su ventana, y el runtime
+  se niega a arrancar en una pestaña oculta: en segundo plano Chrome congela la página y el flujo se
+  quedaría a medias.
+- **Plazo.** El servidor manda en cada petición cuánto va a esperar (90 s para publicar). Si el
+  runtime llega al botón **Publicar** después de ese plazo, aborta sin pulsarlo con
+  `deadline_exceeded`: nunca publica cuando ya nadie espera la respuesta.
 
 > **Aviso.** Automatizar el composer por DOM incumple los Términos de Servicio de Facebook y X, y
 > puede acabar en suspensión de la cuenta. X es especialmente agresivo detectando automatización.
@@ -181,7 +194,7 @@ npm run cli -- open https://example.com
 npm run cli -- outline 42
 npm run cli -- extract 42 readable
 npm run cli -- post x "mensaje de prueba"        # simulado
-npm run cli -- post x "mensaje de prueba" --real # publica
+npm run cli -- post x "mensaje de prueba" --real --as @tu_usuario # publica
 ```
 
 ### Cómo se prueba el runtime
@@ -217,4 +230,9 @@ cliente MCP lo lanza como subproceso local y envolverlo en `docker run -i` solo 
 | `element_not_found` | Llama a `webbot_outline` y usa el selector que devuelve. |
 | `composer_not_found` | No hay sesión iniciada en la red, o cambió su UI: revisa `SOCIAL`. |
 | `post_button_disabled` | El texto no llegó al editor, o supera el límite de caracteres. |
+| `account_required` | Falta `expectedAccount` para publicar: haz antes un `dryRun` y usa su `account`. |
+| `account_mismatch` | La sesión activa es otra cuenta (en Facebook, quizá una página): cámbiala o corrige `expectedAccount`. |
+| `tab_hidden` | La pestaña de la red no está visible: tráela al frente y reintenta. |
+| `deadline_exceeded` | El flujo llegó a Publicar fuera de plazo y abortó sin pulsar. No se publicó nada. |
+| `composer_text_mismatch` | El editor no quedó con el texto pedido, así que no se publica. |
 | El worker parece dormido | La alarma de keepalive lo revive en menos de 30 s; el popup fuerza la reconexión. |

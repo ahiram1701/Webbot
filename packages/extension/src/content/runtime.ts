@@ -27,7 +27,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 2;
+export const RUNTIME_VERSION = 3;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -40,7 +40,7 @@ export const RUNTIME_VERSION = 2;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 2;
+  const RUNTIME_VERSION_INNER = 3;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -320,6 +320,21 @@ export function installWebbotRuntime(): void {
       // execCommand esta obsoleto pero sigue siendo lo unico que Draft.js y Lexical entienden.
       // Puede no existir, asi que se comprueba antes de llamarlo.
       const exec = (document as { execCommand?: (name: string, ui: boolean, value: string) => boolean }).execCommand;
+
+      if (clear && text === "") {
+        // insertText con cadena vacia devuelve true en Chrome pero no borra la seleccion: vaciar es
+        // borrar. "delete" dispara el beforeinput de borrado que Draft.js y Lexical si atienden. Si
+        // Chrome dice que borro, no se toca el DOM a mano: vaciarlo por detras del editor dejaria su
+        // modelo con el texto, y es el modelo lo que se publica.
+        const deleted = typeof exec === "function" ? exec.call(document, "delete", false, "") : false;
+        if (!deleted) {
+          el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, composed: true, cancelable: true, inputType: "deleteContentBackward" }));
+          el.textContent = "";
+          el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "deleteContentBackward" }));
+        }
+        return;
+      }
+
       const inserted = typeof exec === "function" ? exec.call(document, "insertText", false, text) : false;
       if (!inserted) {
         // Camino alternativo para editores que ignoran execCommand.

@@ -49,7 +49,7 @@ beforeEach(() => {
 
 describe("instalacion", () => {
   it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
-    expect(api.version).toBe(2);
+    expect(api.version).toBe(3);
     expect(typeof api.click).toBe("function");
   });
 
@@ -140,6 +140,32 @@ describe("type", () => {
     document.body.innerHTML = `<div id="c" contenteditable="true"></div>`;
     api.type({ target: { css: "#c" }, text: "un post", clear: true });
     expect(document.getElementById("c")?.textContent).toBe("un post");
+  });
+
+  it("vacia un contenteditable con clear y texto vacio, borrando en vez de insertar nada", () => {
+    // Visto en vivo con el borrador que Facebook guarda en su composer: en Chrome,
+    // execCommand("insertText", "") devuelve true pero no borra la seleccion.
+    document.body.innerHTML = `<div id="c" contenteditable="true">borrador guardado</div>`;
+    const el = document.getElementById("c") as HTMLElement;
+    const exec = vi.fn((command: string) => {
+      if (command === "delete") el.textContent = "";
+      return true;
+    });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: exec });
+    try {
+      api.type({ target: { css: "#c" }, text: "", clear: true });
+    } finally {
+      delete (document as { execCommand?: unknown }).execCommand;
+    }
+
+    expect(exec).toHaveBeenCalledWith("delete", false, "");
+    expect(el.textContent).toBe("");
+  });
+
+  it("vacia un contenteditable aunque no exista execCommand", () => {
+    document.body.innerHTML = `<div id="c" contenteditable="true">borrador guardado</div>`;
+    api.type({ target: { css: "#c" }, text: "", clear: true });
+    expect(document.getElementById("c")?.textContent).toBe("");
   });
 
   it("rechaza elementos que no admiten texto", () => {

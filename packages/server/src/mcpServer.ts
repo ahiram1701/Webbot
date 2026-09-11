@@ -175,7 +175,8 @@ export function createWebbotMcpServer(bridge: Bridge): McpServer {
     {
       description:
         "Escribe texto en un input, textarea o contenteditable, disparando los eventos que esperan React/Vue " +
-        "(no basta con asignar el valor). submit:true envia el formulario con Enter al terminar.",
+        "(no basta con asignar el valor). submit:true envia el formulario con Enter al terminar. " +
+        "Con clear:true y text:\"\" vacia el campo, tambien en editores como los composers de Facebook y X.",
       inputSchema: {
         tabId,
         target: TargetSchema,

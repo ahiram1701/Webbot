@@ -78,7 +78,7 @@ function editorTipoLexical(contenido: string): { el: HTMLElement; exec: ReturnTy
 
 describe("instalacion", () => {
   it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
-    expect(api.version).toBe(6);
+    expect(api.version).toBe(7);
     expect(typeof api.click).toBe("function");
   });
 
@@ -566,7 +566,8 @@ describe("postSocial", () => {
     expect(result.button.selector).toBe('[data-testid="real"]');
   });
 
-  it("avanza a la pantalla de configuracion cuando el composer de Facebook acaba en 'Siguiente'", async () => {
+  // Sin ninguna fuente de identidad en el DOM, la deteccion agota su espera de 3 s antes de seguir.
+  it("avanza a la pantalla de configuracion cuando el composer de Facebook acaba en 'Siguiente'", { timeout: 15_000 }, async () => {
     // Facebook partio la publicacion en dos pantallas: el composer ya no trae 'Publicar'.
     document.body.innerHTML = `
       <div role="dialog" aria-label="Crear publicacion">
@@ -713,6 +714,40 @@ describe("postSocial", () => {
       webbotCode: "composer_not_found",
     });
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("identifica al autor por el enlace del dialogo cuando no hay saludo ni barra lateral", async () => {
+    document.body.innerHTML = `
+      <div role="button">xd</div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <a href="https://www.facebook.com/Ahiram1701?__tn__=%3C"></a>
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="publicar">Publicar</div>
+      </div>`;
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as { account: string };
+
+    expect(result.account).toBe("Ahiram1701");
+  });
+
+  it("espera a que la pagina pinte la identidad antes de rendirse", async () => {
+    // Una pestana recien traida al frente puede no tener aun la barra lateral.
+    document.body.innerHTML = `
+      <div role="button">xd</div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="publicar">Publicar</div>
+      </div>`;
+    setTimeout(() => {
+      document.body.insertAdjacentHTML(
+        "afterbegin",
+        `<div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>`,
+      );
+    }, 400);
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as { account: string };
+
+    expect(result.account).toBe("Ahiram SG");
   });
 
   it("avisa si no encuentra el composer de Facebook", async () => {

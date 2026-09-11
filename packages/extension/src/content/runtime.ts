@@ -27,7 +27,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 6;
+export const RUNTIME_VERSION = 7;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -40,7 +40,7 @@ export const RUNTIME_VERSION = 6;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 6;
+  const RUNTIME_VERSION_INNER = 7;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -598,7 +598,25 @@ export function installWebbotRuntime(): void {
    * hay un borrador guardado, que es justo cuando mas falta hace saberlo; el acceso directo de la
    * barra lateral sobrevive y tambien cambia al actuar como una pagina.
    */
-  function facebookAccountNames(): { saludo: string | null; barra: string | null } {
+  /** Primer enlace a un perfil o pagina dentro de `scope`, con su tramo de URL y su texto. */
+  function facebookProfileLink(scope: ParentNode): { slug: string; nombre: string } | null {
+    for (const link of Array.from(scope.querySelectorAll("a[href]"))) {
+      if (!isVisible(link)) continue;
+      let path: string;
+      try {
+        path = new URL(link.getAttribute("href") ?? "", location.href).pathname;
+      } catch {
+        continue;
+      }
+      // Un solo tramo: "/Ahiram1701" o "/profile.php" son perfiles; "/groups/..." no.
+      const [tramo, ...resto] = path.split("/").filter(Boolean);
+      if (!tramo || resto.length > 0 || SOCIAL.facebook.navSections.has(tramo.toLowerCase())) continue;
+      return { slug: tramo, nombre: visibleText(link).trim() };
+    }
+    return null;
+  }
+
+  function facebookAccountNames(): { saludo: string | null; barra: string | null; slug: string | null } {
     let saludo: string | null = null;
     for (const el of Array.from(document.querySelectorAll('[role="button"], [role="textbox"], [aria-placeholder]'))) {
       if (saludo) break;
@@ -611,26 +629,21 @@ export function installWebbotRuntime(): void {
       }
     }
 
-    let barra: string | null = null;
-    for (const link of Array.from(document.querySelectorAll('[role="navigation"] a[href]'))) {
-      if (!isVisible(link)) continue;
-      let path: string;
-      try {
-        path = new URL(link.getAttribute("href") ?? "", location.href).pathname;
-      } catch {
-        continue;
-      }
-      // Un solo tramo: "/Ahiram1701" o "/profile.php" son perfiles; "/groups/..." no.
-      const [tramo, ...resto] = path.split("/").filter(Boolean);
-      if (!tramo || resto.length > 0 || SOCIAL.facebook.navSections.has(tramo.toLowerCase())) continue;
-      const name = visibleText(link).trim();
-      if (name) {
-        barra = name;
-        break;
-      }
+    const dialogo = firstMatching(['[role="dialog"]']);
+    const autor = dialogo ? facebookProfileLink(dialogo) : null;
+
+    let barraLink: { slug: string; nombre: string } | null = null;
+    for (const nav of Array.from(document.querySelectorAll('[role="navigation"]'))) {
+      barraLink = facebookProfileLink(nav);
+      if (barraLink?.nombre) break;
     }
 
-    return { saludo, barra };
+    // Si el autor del dialogo y el perfil de la barra no son el mismo, no se sabe quien publicaria.
+    if (autor && barraLink && autor.slug.toLowerCase() !== barraLink.slug.toLowerCase()) {
+      return { saludo: null, barra: null, slug: null };
+    }
+
+    return { saludo, barra: barraLink?.nombre || null, slug: autor?.slug ?? barraLink?.slug ?? null };
   }
 
   /**
@@ -638,7 +651,7 @@ export function installWebbotRuntime(): void {
    * "Ahiram" y "Ahiram SG" son la misma identidad; "Impulsa CV" y "Ahiram SG" no.
    */
   function facebookAccount(): string | null {
-    const { saludo, barra } = facebookAccountNames();
+    const { saludo, barra, slug } = facebookAccountNames();
     if (saludo && barra) {
       const unas = accountKey(saludo).split(" ");
       const otras = accountKey(barra).split(" ");
@@ -646,7 +659,7 @@ export function installWebbotRuntime(): void {
       const largas = unas.length <= otras.length ? otras : unas;
       if (!cortas.every((palabra, i) => palabra === largas[i])) return null;
     }
-    return saludo ?? barra;
+    return saludo ?? barra ?? slug;
   }
 
   /**
@@ -762,11 +775,6 @@ export function installWebbotRuntime(): void {
   }
 
   async function postToFacebook(text: string, options: PostOptions): Promise<Record<string, unknown>> {
-    const names = facebookAccountNames();
-    const accountAliases = [names.saludo, names.barra].filter((name): name is string => Boolean(name));
-    const account = facebookAccount();
-    checkAccount(account, options, accountAliases);
-
     let composer = firstMatching(SOCIAL.facebook.composer);
 
     if (!composer) {
@@ -788,6 +796,23 @@ export function installWebbotRuntime(): void {
         });
       }
     }
+
+    /**
+     * La identidad se comprueba con el composer ya abierto y antes de escribir nada: en el dialogo
+     * esta el autor del post, y una pagina recien traida al frente puede no haber pintado todavia
+     * la barra lateral. Abrir el dialogo no publica, asi que abortar aqui sigue sin dejar rastro.
+     */
+    const names =
+      (await until(() => {
+        const found = facebookAccountNames();
+        return found.saludo || found.barra || found.slug ? found : null;
+      }, 3_000)) ?? facebookAccountNames();
+    const account = facebookAccount();
+    // Sin identidad clara no se ofrece ningun alias: si las fuentes se contradicen, no vale ninguna.
+    const accountAliases = account
+      ? [names.saludo, names.barra, names.slug].filter((name): name is string => Boolean(name))
+      : [];
+    checkAccount(account, options, accountAliases);
 
     await writeComposer(composer, text, 600);
     // Se describe el composer AQUI: si hay que avanzar de pantalla, Facebook se lleva el texto a

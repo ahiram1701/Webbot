@@ -36,29 +36,47 @@ function scheduleReconnect(): void {
   reconnectDelayMs = Math.min(reconnectDelayMs * 2, RECONNECT_MAX_MS);
 }
 
-function send(frame: Frame): void {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
+/** Envia por `target`, que por defecto es la conexion actual. */
+function send(frame: Frame, target: WebSocket | null = socket): void {
+  if (target?.readyState === WebSocket.OPEN) target.send(JSON.stringify(frame));
 }
 
 /** Margen para que la respuesta llegue al servidor antes de que salte su temporizador. */
 const DEADLINE_MARGIN_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-async function handleRequest(frame: Extract<Frame, { kind: "request" }>): Promise<void> {
+/** La respuesta vuelve por el socket que trajo la peticion, no por el que sea el actual al terminar. */
+async function handleRequest(frame: Extract<Frame, { kind: "request" }>, origin: WebSocket): Promise<void> {
   try {
     const deadlineAt = Date.now() + (frame.timeoutMs ?? DEFAULT_TIMEOUT_MS) - DEADLINE_MARGIN_MS;
     const result = await runCommand(frame.command, { deadlineAt });
-    send({ kind: "response", id: frame.id, ok: true, result });
+    send({ kind: "response", id: frame.id, ok: true, result }, origin);
     await appendLog({ at: Date.now(), command: frame.command.type, ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const code = (error as { code?: string }).code;
-    send({ kind: "response", id: frame.id, ok: false, error: { message, code } });
+    send({ kind: "response", id: frame.id, ok: false, error: { message, code } }, origin);
     await appendLog({ at: Date.now(), command: frame.command.type, ok: false, detail: message });
   }
 }
 
-async function connect(): Promise<void> {
+/**
+ * Solo puede haber un intento de conexion en curso. connect() se llama desde varios sitios a la vez
+ * (al recargar la extension coinciden onInstalled y la llamada de arranque), y comprobar "ya hay
+ * socket" no basta: entre esa comprobacion y la asignacion hay un await. Dos llamadas la pasaban y
+ * abrian dos sockets; el servidor sustituia uno por otro, el cierre del sustituido anulaba el global
+ * y programaba otra reconexion, y asi en bucle, perdiendose las respuestas por el camino.
+ */
+let connecting: Promise<void> | null = null;
+
+function connect(): Promise<void> {
+  connecting ??= openSocket().finally(() => {
+    connecting = null;
+  });
+  return connecting;
+}
+
+async function openSocket(): Promise<void> {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
 
   const settings = await getSettings();
@@ -79,7 +97,7 @@ async function connect(): Promise<void> {
   socket = ws;
 
   ws.addEventListener("open", () => {
-    send({ kind: "hello", token: settings.token, version: PROTOCOL_VERSION, agent: navigator.userAgent });
+    send({ kind: "hello", token: settings.token, version: PROTOCOL_VERSION, agent: navigator.userAgent }, ws);
   });
 
   ws.addEventListener("message", (event: MessageEvent<string>) => {
@@ -99,10 +117,10 @@ async function connect(): Promise<void> {
         void setConnected(true, `Conectado al puente en ${url}.`);
         return;
       case "request":
-        void handleRequest(frame);
+        void handleRequest(frame, ws);
         return;
       case "ping":
-        send({ kind: "pong", t: frame.t });
+        send({ kind: "pong", t: frame.t }, ws);
         return;
       default:
         return;
@@ -110,19 +128,26 @@ async function connect(): Promise<void> {
   });
 
   ws.addEventListener("close", (event: CloseEvent) => {
+    // Un socket que ya no es el actual no toca el estado ni programa reconexiones: eso era lo que
+    // alimentaba el bucle.
+    if (socket !== ws) return;
     socket = null;
     const motivo =
       event.code === 4403
         ? "Token rechazado: el de Opciones no coincide con WEBBOT_TOKEN del servidor."
         : event.code === 4400
           ? "Version de protocolo incompatible: actualiza la extension o el servidor."
-          : `Conexion cerrada (codigo ${event.code}).`;
+          : event.code === 4409
+            ? "Otra conexion de Webbot sustituyo a esta. Comprueba que la extension no este cargada dos veces."
+            : `Conexion cerrada (codigo ${event.code}).`;
     void setConnected(false, motivo);
-    // Un token o una version incorrectos no se arreglan reintentando en bucle.
-    if (event.code !== 4403 && event.code !== 4400) scheduleReconnect();
+    // Un token o una version incorrectos no se arreglan reintentando en bucle, y si el servidor ya
+    // atiende a otra conexion (4409), reconectar solo reabriria la pelea por el puente.
+    if (event.code !== 4403 && event.code !== 4400 && event.code !== 4409) scheduleReconnect();
   });
 
   ws.addEventListener("error", () => {
+    if (socket !== ws) return;
     void setConnected(false, `Sin respuesta en ${url}. Arranca el servidor con 'npm run mcp'.`);
   });
 }

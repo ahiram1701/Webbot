@@ -171,6 +171,22 @@ describe("Bridge", () => {
     });
   });
 
+  it("rechaza al momento lo pendiente de una conexion que otra sustituye", async () => {
+    const target = await startBridge(10_000);
+    await connectFakeExtension(target, { onRequest: () => {} });
+    await waitForConnected(target);
+
+    const inicio = Date.now();
+    const pendiente = expect(target.send({ type: "browser.listTabs" })).rejects.toMatchObject({
+      code: ErrorCodes.NOT_CONNECTED,
+    });
+    // Una segunda conexion sustituye a la primera, como pasaba en bucle al recargar la extension.
+    await connectFakeExtension(target, { onRequest: () => {} });
+
+    await pendiente;
+    expect(Date.now() - inicio).toBeLessThan(5_000);
+  });
+
   it("responde a los ping de la extension para mantener vivo el canal", async () => {
     const target = await startBridge();
     const ws = await connectFakeExtension(target);

@@ -28,6 +28,8 @@ interface Pending {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  /** Conexion por la que salio la peticion: si se cierra o la sustituyen, la respuesta no llegara. */
+  socket: WebSocket;
 }
 
 export interface BridgeOptions {
@@ -101,7 +103,7 @@ export class Bridge {
         );
       }, timeoutMs);
 
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, socket });
       // El plazo viaja con la peticion: la extension no ejecuta una accion irreversible despues de
       // que aqui ya se haya dado por perdida.
       socket.send(JSON.stringify({ kind: "request", id, command, timeoutMs } satisfies Frame));
@@ -164,12 +166,14 @@ export class Bridge {
 
     socket.on("close", () => {
       clearTimeout(authTimer);
+      // Lo que salio por esta conexion ya no tendra respuesta, sea o no la conexion actual.
+      this.rejectPendingOf(
+        socket,
+        new BridgeError("La extension se desconecto antes de responder.", ErrorCodes.NOT_CONNECTED),
+      );
       if (this.client === socket) {
         this.client = null;
         this.stopPing();
-        this.rejectAllPending(
-          new BridgeError("La extension se desconecto antes de responder.", ErrorCodes.NOT_CONNECTED),
-        );
         log("extension desconectada");
       }
     });
@@ -223,6 +227,11 @@ export class Bridge {
   private adoptClient(socket: WebSocket): void {
     if (this.client && this.client !== socket) {
       log("sustituyendo la conexion anterior de la extension");
+      // Sin esto, lo pendiente de la conexion sustituida esperaba al timeout completo.
+      this.rejectPendingOf(
+        this.client,
+        new BridgeError("La conexion con la extension se sustituyo por otra antes de responder.", ErrorCodes.NOT_CONNECTED),
+      );
       this.client.close(4409, "reemplazada por una conexion nueva");
     }
     this.client = socket;
@@ -244,6 +253,15 @@ export class Bridge {
   private stopPing(): void {
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = null;
+  }
+
+  private rejectPendingOf(socket: WebSocket, error: Error): void {
+    for (const [id, pending] of this.pending) {
+      if (pending.socket !== socket) continue;
+      clearTimeout(pending.timer);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
   }
 
   private rejectAllPending(error: Error): void {

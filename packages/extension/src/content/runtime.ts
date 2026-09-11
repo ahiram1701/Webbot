@@ -27,7 +27,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 4;
+export const RUNTIME_VERSION = 5;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -40,7 +40,7 @@ export const RUNTIME_VERSION = 4;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 4;
+  const RUNTIME_VERSION_INNER = 5;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -72,6 +72,13 @@ export function installWebbotRuntime(): void {
       // El composer saluda a quien publica: "¿Qué estás pensando, Impulsa CV?". Si la sesion actua
       // como una pagina, ese nombre es el de la pagina y no el del perfil personal.
       accountInPrompt: [/pensando,\s*(.+?)\s*\?\s*$/i, /on your mind,\s*(.+?)\s*\?\s*$/i],
+      // Secciones de la barra lateral: sus enlaces tambien son de un solo tramo, como los de
+      // perfil, asi que hay que descartarlas para quedarse con quien publica.
+      navSections: new Set([
+        "reel", "reels", "pages", "groups", "friends", "professional_dashboard", "onthisday",
+        "saved", "marketplace", "watch", "events", "memories", "policies", "business", "help",
+        "privacy", "gaming", "fundraisers", "climatescience", "settings",
+      ]),
     },
   };
 
@@ -583,24 +590,67 @@ export function installWebbotRuntime(): void {
     return handle ? `@${handle}` : null;
   }
 
-  function facebookAccount(): string | null {
+  /**
+   * Los dos sitios donde Facebook dice quien publica. El saludo del composer desaparece en cuanto
+   * hay un borrador guardado, que es justo cuando mas falta hace saberlo; el acceso directo de la
+   * barra lateral sobrevive y tambien cambia al actuar como una pagina.
+   */
+  function facebookAccountNames(): { saludo: string | null; barra: string | null } {
+    let saludo: string | null = null;
     for (const el of Array.from(document.querySelectorAll('[role="button"], [role="textbox"], [aria-placeholder]'))) {
+      if (saludo) break;
       if (!isVisible(el)) continue;
       for (const candidate of [el.getAttribute("aria-placeholder") ?? "", accessibleName(el)]) {
         for (const pattern of SOCIAL.facebook.accountInPrompt) {
           const match = candidate.trim().match(pattern);
-          if (match?.[1]) return match[1].trim();
+          if (match?.[1] && !saludo) saludo = match[1].trim();
         }
       }
     }
-    return null;
+
+    let barra: string | null = null;
+    for (const link of Array.from(document.querySelectorAll('[role="navigation"] a[href]'))) {
+      if (!isVisible(link)) continue;
+      let path: string;
+      try {
+        path = new URL(link.getAttribute("href") ?? "", location.href).pathname;
+      } catch {
+        continue;
+      }
+      // Un solo tramo: "/Ahiram1701" o "/profile.php" son perfiles; "/groups/..." no.
+      const [tramo, ...resto] = path.split("/").filter(Boolean);
+      if (!tramo || resto.length > 0 || SOCIAL.facebook.navSections.has(tramo.toLowerCase())) continue;
+      const name = visibleText(link).trim();
+      if (name) {
+        barra = name;
+        break;
+      }
+    }
+
+    return { saludo, barra };
+  }
+
+  /**
+   * Nombre con el que se publicaria, o null si no se puede saber o las dos fuentes se contradicen.
+   * "Ahiram" y "Ahiram SG" son la misma identidad; "Impulsa CV" y "Ahiram SG" no.
+   */
+  function facebookAccount(): string | null {
+    const { saludo, barra } = facebookAccountNames();
+    if (saludo && barra) {
+      const unas = accountKey(saludo).split(" ");
+      const otras = accountKey(barra).split(" ");
+      const cortas = unas.length <= otras.length ? unas : otras;
+      const largas = unas.length <= otras.length ? otras : unas;
+      if (!cortas.every((palabra, i) => palabra === largas[i])) return null;
+    }
+    return saludo ?? barra;
   }
 
   /**
    * Publicar exige decir con que cuenta, y se comprueba ANTES de escribir nada: una sesion de
    * Facebook que actua como pagina publicaria en nombre de la pagina sin avisar.
    */
-  function checkAccount(detected: string | null, options: PostOptions): void {
+  function checkAccount(detected: string | null, options: PostOptions, aliases: string[] = []): void {
     if (!options.dryRun && !options.expectedAccount) {
       throw Object.assign(
         new Error(
@@ -616,7 +666,9 @@ export function installWebbotRuntime(): void {
         webbotCode: "account_mismatch",
       });
     }
-    if (accountKey(detected) !== accountKey(options.expectedAccount)) {
+    // Vale cualquiera de los nombres con los que la red llama a esa misma identidad.
+    const esperado = accountKey(options.expectedAccount);
+    if (![detected, ...aliases].some((name) => accountKey(name) === esperado)) {
       throw Object.assign(
         new Error(
           `La cuenta activa es ${JSON.stringify(detected)}, no ${JSON.stringify(options.expectedAccount)}. No se ha tocado nada.`,
@@ -682,8 +734,10 @@ export function installWebbotRuntime(): void {
   }
 
   async function postToFacebook(text: string, options: PostOptions): Promise<Record<string, unknown>> {
+    const names = facebookAccountNames();
+    const accountAliases = [names.saludo, names.barra].filter((name): name is string => Boolean(name));
     const account = facebookAccount();
-    checkAccount(account, options);
+    checkAccount(account, options, accountAliases);
 
     let composer = firstMatching(SOCIAL.facebook.composer);
 
@@ -758,7 +812,7 @@ export function installWebbotRuntime(): void {
     }
 
     if (options.dryRun) {
-      return { network: "facebook", dryRun: true, posted: false, account, advancedStep, composer: composerAtWrite, button: describeElement(button), text };
+      return { network: "facebook", dryRun: true, posted: false, account, accountAliases, advancedStep, composer: composerAtWrite, button: describeElement(button), text };
     }
 
     checkDeadline(options);
@@ -771,7 +825,7 @@ export function installWebbotRuntime(): void {
       return composer.isConnected && rawText(composer).length > 0 ? null : true;
     }, 15_000);
 
-    return { network: "facebook", dryRun: false, posted: true, confirmed: closed === true, account, url: location.href, text };
+    return { network: "facebook", dryRun: false, posted: true, confirmed: closed === true, account, accountAliases, url: location.href, text };
   }
 
   // -------------------------------------------------------------------------

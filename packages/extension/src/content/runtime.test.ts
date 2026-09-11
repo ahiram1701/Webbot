@@ -78,7 +78,7 @@ function editorTipoLexical(contenido: string): { el: HTMLElement; exec: ReturnTy
 
 describe("instalacion", () => {
   it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
-    expect(api.version).toBe(4);
+    expect(api.version).toBe(5);
     expect(typeof api.click).toBe("function");
   });
 
@@ -602,6 +602,70 @@ describe("postSocial", () => {
 
     expect(result.posted).toBe(false);
     expect(el.textContent).toBe("hola");
+  });
+
+  it("detecta la cuenta por la barra lateral cuando un borrador tapa el saludo", async () => {
+    // Con un borrador guardado, el boton del feed muestra el borrador en vez de "Que estas
+    // pensando, X?", y esa era la unica fuente de identidad.
+    document.body.innerHTML = `
+      <div role="navigation">
+        <a href="https://www.facebook.com/reel/?s=tab"></a>
+        <a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a>
+        <a href="https://www.facebook.com/ahiramescritos/">Ahiram Escritos</a>
+      </div>
+      <div role="button">xd</div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="publicar">Publicar</div>
+      </div>`;
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as { account: string };
+
+    expect(result.account).toBe("Ahiram SG");
+  });
+
+  it("acepta el nombre corto del saludo y el completo de la barra lateral como la misma cuenta", async () => {
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="button">¿Qué estás pensando, Ahiram?</div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="publicar">Publicar</div>
+      </div>`;
+    const dialogo = document.querySelector('[role="dialog"]') as HTMLElement;
+    const spy = vi.fn();
+    document.querySelector('[data-testid="publicar"]')?.addEventListener("click", () => {
+      spy();
+      dialogo.remove();
+    });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: false,
+      expectedAccount: "Ahiram SG",
+    })) as { posted: boolean; account: string };
+
+    expect(spy).toHaveBeenCalledOnce();
+    expect(result.posted).toBe(true);
+    expect(result.account).toBe("Ahiram");
+  });
+
+  it("no publica si el saludo y la barra lateral apuntan a identidades distintas", async () => {
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="button">¿Qué estás pensando, Impulsa CV?</div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="publicar">Publicar</div>
+      </div>`;
+    const spy = vi.fn();
+    document.querySelector('[data-testid="publicar"]')?.addEventListener("click", spy);
+
+    await expect(
+      api.postSocial({ network: "facebook", text: "hola", dryRun: false, expectedAccount: "Ahiram SG" }),
+    ).rejects.toMatchObject({ webbotCode: "account_mismatch" });
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("avisa si no encuentra el composer de Facebook", async () => {

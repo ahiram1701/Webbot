@@ -78,7 +78,7 @@ function editorTipoLexical(contenido: string): { el: HTMLElement; exec: ReturnTy
 
 describe("instalacion", () => {
   it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
-    expect(api.version).toBe(7);
+    expect(api.version).toBe(8);
     expect(typeof api.click).toBe("function");
   });
 
@@ -748,6 +748,44 @@ describe("postSocial", () => {
     const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as { account: string };
 
     expect(result.account).toBe("Ahiram SG");
+  });
+
+  it("reutiliza un composer ya abierto en la pantalla de configuracion en vez de apilar otro", async () => {
+    // Visto en vivo: el dialogo se quedo en el segundo paso, sin cuadro de texto, y el runtime
+    // pulsaba el boton del feed, abriendo un segundo composer encima del primero.
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="main">
+        <div>
+          <div role="button" id="abrir">xd</div>
+          <div role="button" aria-label="Foto/video">foto</div>
+        </div>
+      </div>
+      <div role="dialog" aria-label="Configuracion de la publicacion">
+        <div role="button" aria-label="Volver">volver</div>
+        <div role="button" data-testid="publicar">Publicar</div>
+      </div>`;
+    const abrirFeed = vi.fn();
+    document.getElementById("abrir")?.addEventListener("click", abrirFeed);
+    document.querySelector('[aria-label="Volver"]')?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div role="dialog" aria-label="Crear publicacion">
+           <div role="textbox" contenteditable="true">xd</div>
+           <div role="button" data-testid="siguiente">Siguiente</div>
+         </div>`,
+      );
+    });
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as {
+      posted: boolean;
+      button: { selector: string };
+    };
+
+    expect(abrirFeed).not.toHaveBeenCalled();
+    expect(result.posted).toBe(false);
+    expect(result.button.selector).toBe('[data-testid="publicar"]');
+    expect(document.querySelector('[aria-label="Crear publicacion"] [role="textbox"]')?.textContent).toBe("hola");
   });
 
   it("avisa si no encuentra el composer de Facebook", async () => {

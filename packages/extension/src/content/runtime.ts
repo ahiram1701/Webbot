@@ -27,7 +27,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 7;
+export const RUNTIME_VERSION = 8;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -40,7 +40,7 @@ export const RUNTIME_VERSION = 7;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 7;
+  const RUNTIME_VERSION_INNER = 8;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -72,6 +72,7 @@ export function installWebbotRuntime(): void {
       // Facebook parte la publicacion en dos pantallas: el composer acaba en "Siguiente" y
       // "Publicar" vive en el dialogo de configuracion que viene despues.
       nextStepNames: [/^siguiente$/i, /^next$/i],
+      backNames: [/^volver$/i, /^back$/i, /^atr[aá]s$/i],
       // El composer saluda a quien publica: "¿Qué estás pensando, Impulsa CV?". Si la sesion actua
       // como una pagina, ese nombre es el de la pagina y no el del perfil personal.
       accountInPrompt: [/pensando,\s*(.+?)\s*\?\s*$/i, /on your mind,\s*(.+?)\s*\?\s*$/i],
@@ -774,8 +775,34 @@ export function installWebbotRuntime(): void {
     return null;
   }
 
+  /**
+   * Un composer ya abierto en la pantalla de configuracion no muestra el cuadro de texto, asi que
+   * parecia que no hubiera composer y se intentaba abrir otro: Facebook acababa con dos dialogos
+   * apilados y el segundo tapando al primero. Se reconoce esa pantalla por estructura, no por su
+   * titulo, que depende del idioma: es el dialogo visible que tiene a la vez un boton de volver y
+   * uno de publicar. Volviendo se recupera el composer en vez de crear otro.
+   */
+  async function facebookBackToComposer(): Promise<Element | null> {
+    const settings = Array.from(document.querySelectorAll('[role="dialog"]')).find(
+      (dialog) =>
+        isVisible(dialog) &&
+        buttonByName(SOCIAL.facebook.backNames, dialog) !== null &&
+        buttonByName(SOCIAL.facebook.postButtonNames, dialog) !== null,
+    );
+    if (!settings) return null;
+
+    const back = buttonByName(SOCIAL.facebook.backNames, settings);
+    if (!back) return null;
+
+    dispatchClick(back);
+    return until(() => firstMatching(SOCIAL.facebook.composer), 5_000);
+  }
+
   async function postToFacebook(text: string, options: PostOptions): Promise<Record<string, unknown>> {
     let composer = firstMatching(SOCIAL.facebook.composer);
+
+    // Antes de abrir uno nuevo: puede haber un composer abierto en la pantalla de configuracion.
+    if (!composer) composer = await facebookBackToComposer();
 
     if (!composer) {
       const opener = facebookComposerOpener();

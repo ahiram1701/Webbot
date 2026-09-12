@@ -1,3 +1,6 @@
+import type { PanelContext } from "@webbot/shared";
+
+import { activeTab } from "../background/activeTab.js";
 import { PANEL_PORT, type PanelMessage, type PanelUpdate } from "../background/agent.js";
 import { getSettings } from "../background/settings.js";
 import { applyEvent, answerConfirm, type TranscriptEntry } from "../background/transcript.js";
@@ -14,6 +17,8 @@ const sendEl = $<HTMLButtonElement>("send");
 
 let transcript: TranscriptEntry[] = [];
 let running = false;
+/** La pagina que el panel tiene al lado; null si no es una pagina sobre la que se pueda actuar. */
+let tab: PanelContext | null = null;
 /** Ultima senal de vida del agente, para poder decir cuanto lleva callado. */
 let lastSignAt = Date.now();
 let activityTimer: ReturnType<typeof setInterval> | null = null;
@@ -38,8 +43,50 @@ async function renderStatus(): Promise<void> {
 }
 
 chrome.storage.onChanged.addListener((_changes, area) => {
-  if (area === "session" || area === "local") void renderStatus();
+  if (area !== "session" && area !== "local") return;
+  void renderStatus();
+  // Tocar la allowlist en Opciones cambia si la pestana de al lado esta permitida o no.
+  void renderTab();
 });
+
+// --- La pestana que la persona tiene delante -------------------------------
+
+/** Quita el "www." igual que hace la allowlist: en una columna estrecha solo estorba. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Va aparte de render() a proposito. render() rehace el log entero con replaceChildren, asi que
+ * repintarlo en cada cambio de pestana cerraria los <details> abiertos y perderia el scroll.
+ */
+async function renderTab(): Promise<void> {
+  tab = await activeTab();
+  const row = $("tab");
+  row.hidden = tab === null;
+  if (tab) {
+    row.classList.toggle("blocked", !tab.allowed);
+    row.title = tab.url;
+    $("tab-host").textContent = hostOf(tab.url);
+    $("tab-title").textContent = tab.allowed ? tab.title : "fuera de la allowlist";
+  }
+  refreshQuick();
+}
+
+/** Un atajo que solo puede acabar en domain_blocked es peor que no ofrecerlo. */
+function refreshQuick(): void {
+  const box = $("quick");
+  box.hidden = running || tab === null;
+  const blocked = tab !== null && !tab.allowed;
+  for (const chip of box.querySelectorAll("button")) {
+    chip.disabled = blocked;
+    chip.title = blocked ? `${hostOf(tab?.url ?? "")} no esta en la allowlist: anadelo en Opciones.` : "";
+  }
+}
 
 // --- Pintado de la conversacion -------------------------------------------
 
@@ -154,7 +201,8 @@ function render(): void {
   if (transcript.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = 'Dile que hacer. Por ejemplo: "abre example.com y dime de que va".';
+    empty.textContent =
+      'Dile que hacer sobre la pagina que tienes al lado: "resume esto", "de que va esto". Abajo tienes atajos.';
     logEl.append(empty);
   }
 
@@ -190,6 +238,7 @@ function render(): void {
   sendEl.textContent = running ? "Detener" : "Enviar";
   sendEl.classList.toggle("stop", running);
   refreshActivity();
+  refreshQuick();
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
 
@@ -260,5 +309,22 @@ $("reconnect").addEventListener("click", async () => {
 
 $("options").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
+// Los atajos mandan la instruccion tal cual: el worker devuelve el snapshot con la entrada ya puesta.
+$("quick").addEventListener("click", (event) => {
+  const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-prompt]");
+  if (!chip || chip.disabled || running) return;
+  post({ type: "prompt", text: chip.dataset.prompt ?? "" });
+});
+
+chrome.tabs.onActivated.addListener(() => void renderTab());
+chrome.windows.onFocusChanged.addListener(() => void renderTab());
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // Sin fila visible tambien interesa: un chrome:// que navega a una pagina normal la hace aparecer.
+  const mine = tab === null || tab.tabId === tabId;
+  const visible = changeInfo.url !== undefined || changeInfo.title !== undefined || changeInfo.status === "complete";
+  if (mine && visible) void renderTab();
+});
+
 post({ type: "sync" });
 void renderStatus();
+void renderTab();

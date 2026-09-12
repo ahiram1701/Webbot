@@ -7,6 +7,7 @@ import {
   type AgentFrame,
   type Command,
   type Frame,
+  type PanelContext,
 } from "@webbot/shared";
 
 import { BridgeError } from "./bridge.js";
@@ -37,6 +38,7 @@ const SYSTEM = [
   "Hablas directamente con la persona que usa este navegador a traves de un panel lateral de la extension, no con otro agente.",
   "Responde en el idioma en el que te escriban, en pocas frases y sin volcar JSON crudo: resume lo que encontraste.",
   "Cuando una herramienta falle, lee el codigo de error y corrige: element_not_found se arregla mirando la pagina con webbot_outline, domain_blocked lo tiene que resolver la persona anadiendo el dominio en Opciones.",
+  "Cada mensaje puede venir precedido de la pestana que la persona tiene delante: 'esta pagina', 'aqui' o 'lo que estoy viendo' se refieren a ese tabId. Usalo directamente, sin volver a listar pestanas ni abrir una nueva. Si la pestana aparece como NO permitida, dilo y no lo intentes.",
 ].join(" ");
 
 interface PendingConfirm {
@@ -75,6 +77,18 @@ function serializeResult(command: Command, result: unknown): string {
   }
   const json = JSON.stringify(result ?? null);
   return json.length > MAX_RESULT_CHARS ? `${json.slice(0, MAX_RESULT_CHARS)}... [recortado]` : json;
+}
+
+/**
+ * El panel sabe que pestana mira la persona, asi que se la cuenta al modelo antes de que piense.
+ * Ahorra un webbot_list_tabs por turno y, sobre todo, hace que "esto" o "aqui" signifiquen algo.
+ */
+function withContext(prompt: string, context?: PanelContext): string {
+  if (!context) return prompt;
+  const estado = context.allowed ? "permitida" : "NO permitida: esta fuera de la allowlist";
+  const titulo = context.title ? `, titulo "${context.title}"` : "";
+  const cabecera = `[Pestana que la persona tiene delante: tabId ${context.tabId}, ${context.url}${titulo} (${estado})]`;
+  return `${cabecera}\n\n${prompt}`;
 }
 
 export function createAgentRunner(
@@ -171,8 +185,8 @@ export function createAgentRunner(
     }
   };
 
-  const loop = async (runId: string, run: Run, prompt: string): Promise<void> => {
-    let input: LlmInput = { kind: "user", text: prompt };
+  const loop = async (runId: string, run: Run, prompt: string, context?: PanelContext): Promise<void> => {
+    let input: LlmInput = { kind: "user", text: withContext(prompt, context) };
 
     for (let step = 1; step <= AGENT_MAX_STEPS; step += 1) {
       // Dos motivos para abortar, y hay que distinguirlos: detener es del usuario y no merece
@@ -221,7 +235,7 @@ export function createAgentRunner(
     });
   };
 
-  const start = (runId: string, prompt: string): void => {
+  const start = (runId: string, prompt: string, context?: PanelContext): void => {
     if (!provider) {
       emit(runId, {
         type: "error",
@@ -252,7 +266,7 @@ export function createAgentRunner(
     run.busy = true;
     runs.set(runId, run);
 
-    void loop(runId, run, prompt)
+    void loop(runId, run, prompt, context)
       .catch((error: unknown) => {
         if (run.cancelled) return;
         const message = error instanceof Error ? error.message : String(error);
@@ -280,7 +294,7 @@ export function createAgentRunner(
     handle(frame: AgentFrame): void {
       switch (frame.kind) {
         case "agent.start":
-          start(frame.runId, frame.prompt);
+          start(frame.runId, frame.prompt, frame.context);
           return;
         case "agent.cancel":
           cancel(frame.runId);

@@ -115,6 +115,18 @@ export type CommandType = Command["type"];
 export const AGENT_MAX_STEPS = 30;
 
 /**
+ * La pestana que la persona tiene delante cuando escribe en el panel. Viaja con la instruccion para
+ * que "esto" o "aqui" signifiquen algo sin que el modelo tenga que listar pestanas para adivinarlo.
+ */
+export const PanelContextSchema = z.object({
+  tabId: z.number().int(),
+  url: z.string(),
+  title: z.string(),
+  allowed: z.boolean().describe("Si el dominio esta en la allowlist de la extension."),
+});
+export type PanelContext = z.infer<typeof PanelContextSchema>;
+
+/**
  * Lo que el servidor cuenta al panel mientras trabaja. El panel pinta cada evento segun llega, asi
  * que `text` y `reasoning` son deltas, no el mensaje entero.
  */
@@ -176,8 +188,17 @@ export const FrameSchema = z.discriminatedUnion("kind", [
    * Unica direccion en la que manda la extension: el panel pide ejecutar una instruccion y el
    * servidor le devuelve eventos. Las herramientas que el modelo decida usar bajan despues como
    * tramas `request` normales, asi que la allowlist y los plazos se aplican igual que siempre.
+   *
+   * `context` es opcional a proposito y no sube PROTOCOL_VERSION: una extension sin recargar
+   * simplemente no lo manda y el servidor sigue funcionando como hasta ahora. Los saltos a v2 y v3
+   * existen porque una extension vieja se saltaria protecciones o se quedaria muda; esto no.
    */
-  z.object({ kind: z.literal("agent.start"), runId: z.string(), prompt: z.string().min(1) }),
+  z.object({
+    kind: z.literal("agent.start"),
+    runId: z.string(),
+    prompt: z.string().min(1),
+    context: PanelContextSchema.optional(),
+  }),
   z.object({ kind: z.literal("agent.cancel"), runId: z.string() }),
   z.object({ kind: z.literal("agent.confirm"), runId: z.string(), confirmId: z.string(), approved: z.boolean() }),
   z.object({ kind: z.literal("agent.event"), runId: z.string(), event: AgentEventSchema }),

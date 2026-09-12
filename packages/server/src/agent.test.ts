@@ -87,6 +87,52 @@ describe("agente del panel", () => {
     expect(events.map((event) => event.type)).toEqual(["tool", "toolResult", "text", "done"]);
   });
 
+  it("le pasa al modelo la pestana que la persona tiene delante", async () => {
+    const provider = fakeProvider([turn({ text: "Va de dominios de ejemplo.", stop: "end" })]);
+    const { bridge, events } = fakeBridge();
+
+    createAgentRunner(bridge, provider).handle({
+      kind: "agent.start",
+      runId: "r1",
+      prompt: "de que va esto",
+      context: { tabId: 42, url: "https://example.com/", title: "Example Domain", allowed: true },
+    });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    const first = provider.inputs[0] as { kind: string; text: string };
+    expect(first.kind).toBe("user");
+    expect(first.text).toContain("tabId 42");
+    expect(first.text).toContain("https://example.com/");
+    expect(first.text).toContain("Example Domain");
+    expect(first.text).toContain("permitida");
+    // Lo que escribio la persona llega entero y al final, no diluido en la cabecera.
+    expect(first.text.endsWith("de que va esto")).toBe(true);
+  });
+
+  it("avisa al modelo cuando la pestana de delante esta fuera de la allowlist", async () => {
+    const provider = fakeProvider([turn({ text: "Ese dominio no esta permitido.", stop: "end" })]);
+    const { bridge, events } = fakeBridge();
+
+    createAgentRunner(bridge, provider).handle({
+      kind: "agent.start",
+      runId: "r1",
+      prompt: "resume esto",
+      context: { tabId: 7, url: "https://noestá.example/", title: "", allowed: false },
+    });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    expect((provider.inputs[0] as { text: string }).text).toContain("NO permitida");
+  });
+
+  it("sin contexto manda el prompt tal cual: una extension sin recargar no manda ninguno", async () => {
+    const provider = fakeProvider([turn({ text: "Hecho.", stop: "end" })]);
+    const { bridge, events } = fakeBridge();
+
+    createAgentRunner(bridge, provider).handle({ kind: "agent.start", runId: "r1", prompt: "hola" });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    expect(provider.inputs[0]).toEqual({ kind: "user", text: "hola" });
+  });
   it("le cuenta al modelo el codigo de error del puente en vez de cortar el bucle", async () => {
     const provider = fakeProvider([
       turn({ stop: "tools", toolCalls: [{ id: "c1", name: "webbot_click", input: { tabId: 1, target: { text: "X" } } }] }),

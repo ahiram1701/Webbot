@@ -1,5 +1,6 @@
 import type { AgentEvent, Frame } from "@webbot/shared";
 
+import { activeTab } from "./activeTab.js";
 import { answerConfirm, applyEvent, type TranscriptEntry } from "./transcript.js";
 
 /**
@@ -121,7 +122,9 @@ export function registerPanel(send: (frame: Frame) => boolean): void {
             state.running = true;
             persist(true);
             toPanel({ type: "snapshot", transcript: state.transcript, running: true });
-            if (!send({ kind: "agent.start", runId: state.runId, prompt: message.text })) {
+            // Se mira al enviar, no al abrir el panel: entre una cosa y otra puede haber cambiado.
+            const context = (await activeTab()) ?? undefined;
+            if (!send({ kind: "agent.start", runId: state.runId, prompt: message.text, context })) {
               void handleAgentEvent(state.runId, {
                 type: "error",
                 message: "No hay conexion con el servidor. Arrancalo con 'npm run mcp' y pulsa Reconectar.",

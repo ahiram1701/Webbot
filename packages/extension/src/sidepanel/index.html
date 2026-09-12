@@ -13,6 +13,7 @@
         --border: #e4e4e7;
         --ok: #16a34a;
         --bad: #dc2626;
+        --warn: #b45309;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -21,6 +22,7 @@
           --bg: #18181b;
           --soft: #27272a;
           --border: #3f3f46;
+          --warn: #fbbf24;
         }
       }
       * {
@@ -81,6 +83,62 @@
         font-size: 11px;
       }
 
+      /* La pagina que la persona tiene delante. El panel vive pegado a ella, asi que conviene
+         decir de cual estamos hablando antes de que escriba nada. */
+      #tab {
+        color: var(--muted);
+        margin: 4px 0 0;
+        font-size: 11px;
+        display: flex;
+        gap: 5px;
+        align-items: baseline;
+      }
+      #tab[hidden] {
+        display: none;
+      }
+      #tab-host {
+        flex: none;
+        font-weight: 600;
+      }
+      #tab-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #tab.blocked {
+        color: var(--warn);
+      }
+
+      /* Lo que se pide siempre, a un clic: sin esto la primera impresion del panel es un cuadro de
+         texto vacio y ninguna pista de que sabe hacer. */
+      #quick {
+        flex: none;
+        padding: 0 12px 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      #quick[hidden] {
+        display: none;
+      }
+      #quick button {
+        font: inherit;
+        font-size: 11px;
+        color: var(--muted);
+        background: var(--soft);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 3px 9px;
+        cursor: pointer;
+      }
+      #quick button:hover:not(:disabled) {
+        color: var(--fg);
+        border-color: var(--muted);
+      }
+      #quick button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
       #log {
         flex: 1;
         overflow-y: auto;
@@ -295,10 +353,19 @@
         <button id="options">Opciones</button>
       </h1>
       <p id="detail"></p>
+      <p id="tab" hidden><span id="tab-host"></span><span id="tab-title"></span></p>
     </header>
 
     <div id="log">
-      <p class="empty">Dile que hacer. Por ejemplo: "abre example.com y dime de que va".</p>
+      <p class="empty">Dile que hacer sobre la pagina que tienes al lado: "resume esto", "de que va esto". Abajo tienes atajos.</p>
+    </div>
+
+    <div id="quick" hidden>
+      <button type="button" data-prompt="Resume la pagina que tengo abierta.">Resumir</button>
+      <button type="button" data-prompt="Dime los enlaces utiles de esta pagina.">Enlaces</button>
+      <button type="button" data-prompt="Mira los elementos interactivos de esta pagina y dime que puedo pedirte sobre ella.">
+        Que hay aqui
+      </button>
     </div>
 
     <p id="activity" hidden><span class="pulse"></span><span id="activity-text"></span></p>

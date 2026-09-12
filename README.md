@@ -83,6 +83,12 @@ corre en la extensión sino en `packages/server`, que es quien llama al modelo; 
 el modelo decide usar bajan por el puente como cualquier otro comando. Por eso el servidor tiene que
 estar arrancado (`npm run mcp`) también para este modo.
 
+El panel sabe qué pestaña tienes delante y se la cuenta al agente con cada instrucción, así que
+**«resume esto» o «¿qué enlaces hay aquí?» funcionan sin dictarle la URL**. La cabecera enseña de qué
+página se está hablando, y en ámbar cuando ese dominio no está en la allowlist. Debajo del chat hay
+tres atajos —**Resumir**, **Enlaces**, **Qué hay aquí**— que mandan justo eso en un clic; se
+deshabilitan cuando el dominio no está permitido, porque ahí solo podrían fallar.
+
 Configura el modelo en el `.env` de la raíz:
 
 ```bash

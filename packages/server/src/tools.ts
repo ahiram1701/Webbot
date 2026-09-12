@@ -222,16 +222,35 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
 /** Para resolver por nombre lo que pide el modelo. */
 export const WEBBOT_TOOLS_BY_NAME = new Map(WEBBOT_TOOLS.map((entry) => [entry.name, entry]));
 
-/**
- * Instrucciones comunes a los dos cerebros: describen como se conduce la pagina, no quien pregunta.
- * Estaban en mcpServer.ts y las hereda tambien el agente del panel.
- */
-export const WEBBOT_INSTRUCTIONS = [
+/** Como se conduce la pagina. Igual para los dos cerebros. */
+const CONDUCIR = [
   "Webbot conduce el Chrome del usuario a traves de una extension MV3: extrae texto, hace clic y escribe en paginas, y publica en Facebook/X.",
   "Flujo tipico: 1) webbot_list_tabs o webbot_open_tab para tener un tabId. 2) webbot_outline para VER que hay en la pagina y descubrir el selector del boton o campo. 3) webbot_click / webbot_type para actuar. 4) webbot_extract para leer el resultado.",
   "webbot_outline es la herramienta clave antes de interactuar: devuelve roles, textos y un selector sugerido por elemento. No adivines selectores, miralos primero.",
   "Los targets aceptan css, xpath, text, role o name y se combinan como AND; usa 'index' para desempatar.",
   "webbot_extract aplica automaticamente un perfil por dominio si existe; el campo 'selectors' de la llamada lo sobrescribe.",
-  "webbot_post_social PUBLICA DE VERDAD, sin confirmacion. Haz siempre primero dryRun:true: devuelve en 'account' la cuenta con la que se publicaria (en Facebook puede ser una pagina y no el perfil). Confirma esa cuenta y el texto con el usuario, y solo entonces publica con dryRun:false pasando expectedAccount; sin el, o si no coincide, la publicacion se aborta sin tocar nada.",
   "Solo se puede actuar sobre dominios de la allowlist configurada en la extension; si un comando falla con domain_blocked, el usuario debe anadir el dominio en Opciones.",
-].join(" ");
+];
+
+/**
+ * Publicar es lo unico que cambia segun quien pregunte, y por eso no puede ser texto compartido.
+ *
+ * Por MCP hay una persona leyendo la conversacion, asi que el permiso se pide por escrito. En el
+ * panel hay una tarjeta con botones que para el bucle antes de tocar nada, asi que pedirlo ademas
+ * por escrito deja al agente esperando un "si" que la persona ya no tiene que escribir: el ensayo
+ * completo enseño justo eso, un dryRun seguido de una pregunta y ninguna tarjeta.
+ */
+const PUBLICAR_MCP =
+  "webbot_post_social PUBLICA DE VERDAD, sin confirmacion. Haz siempre primero dryRun:true: devuelve en 'account' la cuenta con la que se publicaria (en Facebook puede ser una pagina y no el perfil). Confirma esa cuenta y el texto con el usuario, y solo entonces publica con dryRun:false pasando expectedAccount; sin el, o si no coincide, la publicacion se aborta sin tocar nada.";
+
+const PUBLICAR_PANEL =
+  "webbot_post_social publica de verdad cuando dryRun no es true. Haz siempre primero dryRun:true: devuelve en 'account' la cuenta con la que saldria (en Facebook puede ser una pagina y no el perfil). Despues llama OTRA VEZ con dryRun:false y expectedAccount con esa cuenta, sin preguntar nada por escrito: al hacerlo, el panel ensena automaticamente una tarjeta con el texto y la cuenta, y la persona decide ahi con dos botones. No le pidas que escriba 'si' ni esperes su respuesta en el chat, porque no va a llegar; si le pides permiso por escrito la publicacion se queda a medias.";
+
+/** `audience` decide como se pide permiso para publicar, que es lo unico que difiere. */
+export function webbotInstructions(audience: "mcp" | "panel"): string {
+  const publicar = audience === "mcp" ? PUBLICAR_MCP : PUBLICAR_PANEL;
+  return [...CONDUCIR.slice(0, -1), publicar, CONDUCIR[CONDUCIR.length - 1]].join(" ");
+}
+
+/** Las que ve un agente externo por MCP. */
+export const WEBBOT_INSTRUCTIONS = webbotInstructions("mcp");

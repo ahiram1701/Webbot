@@ -11,7 +11,7 @@ import {
 
 import { BridgeError } from "./bridge.js";
 import { LlmError, type LlmConversation, type LlmInput, type LlmProvider, type LlmToolResult } from "./llm/index.js";
-import { WEBBOT_INSTRUCTIONS, WEBBOT_TOOLS, WEBBOT_TOOLS_BY_NAME } from "./tools.js";
+import { webbotInstructions, WEBBOT_TOOLS, WEBBOT_TOOLS_BY_NAME } from "./tools.js";
 
 /** Lo que el runner necesita del puente. Un interfaz asi de estrecho hace trivial falsearlo. */
 export interface AgentBridge {
@@ -33,11 +33,10 @@ const MAX_RESULT_CHARS = 60_000;
 const MAX_SUMMARY_CHARS = 300;
 
 const SYSTEM = [
-  WEBBOT_INSTRUCTIONS,
+  webbotInstructions("panel"),
   "Hablas directamente con la persona que usa este navegador a traves de un panel lateral de la extension, no con otro agente.",
   "Responde en el idioma en el que te escriban, en pocas frases y sin volcar JSON crudo: resume lo que encontraste.",
   "Cuando una herramienta falle, lee el codigo de error y corrige: element_not_found se arregla mirando la pagina con webbot_outline, domain_blocked lo tiene que resolver la persona anadiendo el dominio en Opciones.",
-  "Antes de publicar de verdad la persona vera una tarjeta de confirmacion en el panel, asi que no tienes que pedir permiso por escrito: haz el dryRun, comprueba la cuenta y lanza la publicacion.",
 ].join(" ");
 
 interface PendingConfirm {

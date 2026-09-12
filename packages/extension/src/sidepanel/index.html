@@ -203,6 +203,47 @@
         font-size: 11px;
       }
 
+      /* Con proveedores lentos pasa un minuto entre el envio y el primer byte: sin esto no hay
+         forma de distinguir "esta pensando" de "se ha roto". */
+      #activity {
+        flex: none;
+        margin: 0;
+        padding: 6px 12px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 11px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      /* Un selector de id gana al [hidden] del navegador: sin esto la barra se ve siempre vacia. */
+      #activity[hidden] {
+        display: none;
+      }
+      .pulse {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex: none;
+        animation: latido 1.2s ease-in-out infinite;
+      }
+      @keyframes latido {
+        0%,
+        100% {
+          opacity: 0.25;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .pulse {
+          animation: none;
+          opacity: 0.7;
+        }
+      }
+
       form {
         flex: none;
         border-top: 1px solid var(--border);
@@ -259,6 +300,8 @@
     <div id="log">
       <p class="empty">Dile que hacer. Por ejemplo: "abre example.com y dime de que va".</p>
     </div>
+
+    <p id="activity" hidden><span class="pulse"></span><span id="activity-text"></span></p>
 
     <form id="composer">
       <textarea id="prompt" rows="1" placeholder="Que quieres que haga..."></textarea>

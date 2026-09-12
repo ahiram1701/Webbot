@@ -21,6 +21,12 @@ export interface AgentBridge {
 
 /** Sin respuesta a una confirmacion, el run no puede quedarse colgado para siempre. */
 const CONFIRM_TIMEOUT_MS = 5 * 60_000;
+/**
+ * Techo por turno del modelo. Generoso a proposito: hay proveedores que tardan un minuto en soltar
+ * el primer byte. Lo que evita es que un proveedor que no contesta deje el run esperando para
+ * siempre, sin mas salida que el boton Detener.
+ */
+const DEFAULT_TURN_TIMEOUT_MS = 180_000;
 /** Tope de lo que se le devuelve al modelo por herramienta: una extraccion entera lo ahoga. */
 const MAX_RESULT_CHARS = 60_000;
 /** Lo que se ensena en el panel junto a cada paso. */
@@ -76,6 +82,7 @@ export function createAgentRunner(
   bridge: AgentBridge,
   provider: LlmProvider | null,
   providerError: LlmError | null = null,
+  turnTimeoutMs: number = DEFAULT_TURN_TIMEOUT_MS,
 ): AgentRunner {
   const runs = new Map<string, Run>();
 
@@ -169,14 +176,30 @@ export function createAgentRunner(
     let input: LlmInput = { kind: "user", text: prompt };
 
     for (let step = 1; step <= AGENT_MAX_STEPS; step += 1) {
-      const turn = await run.conversation.send(
-        input,
-        {
-          onText: (delta) => emit(runId, { type: "text", delta }),
-          onReasoning: (delta) => emit(runId, { type: "reasoning", delta }),
-        },
-        run.controller.signal,
-      );
+      // Dos motivos para abortar, y hay que distinguirlos: detener es del usuario y no merece
+      // mensaje de error; agotar el plazo si, porque el proveedor se quedo callado.
+      const expired = AbortSignal.timeout(turnTimeoutMs);
+      let turn;
+      try {
+        turn = await run.conversation.send(
+          input,
+          {
+            onText: (delta) => emit(runId, { type: "text", delta }),
+            onReasoning: (delta) => emit(runId, { type: "reasoning", delta }),
+          },
+          AbortSignal.any([run.controller.signal, expired]),
+        );
+      } catch (error) {
+        if (run.cancelled) return;
+        if (expired.aborted) {
+          throw new LlmError(
+            `El modelo no respondio en ${Math.round(turnTimeoutMs / 1_000)} s. Puede ir saturado; ` +
+              "reintenta o usa un modelo mas rapido en WEBBOT_LLM_MODEL.",
+            ErrorCodes.LLM_ERROR,
+          );
+        }
+        throw error;
+      }
       if (run.cancelled) return;
 
       if (turn.toolCalls.length === 0) {

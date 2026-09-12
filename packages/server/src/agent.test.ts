@@ -189,6 +189,52 @@ describe("agente del panel", () => {
     expect(events.some((event) => event.type === "done")).toBe(false);
   });
 
+  it("corta el turno si el proveedor se queda callado", async () => {
+    // Proveedor que no responde nunca: sin techo, el run se quedaria esperando para siempre y la
+    // unica salida seria el boton Detener.
+    const mudo: LlmProvider = {
+      label: "mudo:modelo",
+      start: () => ({
+        send: (_input, _handlers, signal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(new Error("abortado")));
+          }),
+      }),
+    };
+    const { bridge, commands, events } = fakeBridge();
+
+    createAgentRunner(bridge, mudo, null, 50).handle({ kind: "agent.start", runId: "r1", prompt: "haz algo" });
+    await waitFor(() => events.some((event) => event.type === "error"), "error");
+
+    expect(commands).toEqual([]);
+    const fallo = events.find((event) => event.type === "error") as Extract<AgentEvent, { type: "error" }>;
+    expect(fallo.message).toContain("no respondio");
+    expect(fallo.code).toBe(ErrorCodes.LLM_ERROR);
+  });
+
+  it("detener no se reporta como un plazo agotado", async () => {
+    const mudo: LlmProvider = {
+      label: "mudo:modelo",
+      start: () => ({
+        send: (_input, _handlers, signal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(new Error("abortado")));
+          }),
+      }),
+    };
+    const { bridge, events } = fakeBridge();
+    const runner = createAgentRunner(bridge, mudo, null, 60_000);
+
+    runner.handle({ kind: "agent.start", runId: "r1", prompt: "haz algo" });
+    await tick();
+    runner.handle({ kind: "agent.cancel", runId: "r1" });
+    await waitFor(() => events.some((event) => event.type === "error"), "error");
+
+    const fallo = events.find((event) => event.type === "error") as Extract<AgentEvent, { type: "error" }>;
+    expect(fallo.code).toBe(ErrorCodes.AGENT_CANCELLED);
+    expect(events.filter((event) => event.type === "error")).toHaveLength(1);
+  });
+
   it("sin modelo configurado avisa y no toca el puente", async () => {
     const { bridge, commands, events } = fakeBridge();
     const error = new LlmError("Falta la clave del modelo.", ErrorCodes.LLM_NOT_CONFIGURED);

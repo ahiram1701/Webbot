@@ -66,6 +66,7 @@ function llmConfig(): LlmConfig | null {
     apiKey,
     baseUrl,
     thinking: (process.env.WEBBOT_LLM_THINKING?.trim().toLowerCase() || "adaptive") !== "off",
+    timeoutMs: intFromEnv("WEBBOT_LLM_TIMEOUT_MS", 180_000),
   };
 }
 

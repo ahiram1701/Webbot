@@ -22,7 +22,7 @@ export function attachAgent(bridge: Bridge): void {
   if (provider) log(`agente del panel listo con ${provider.label}`);
   else log("sin modelo configurado: el panel de la extension no podra ejecutar instrucciones");
 
-  const runner = createAgentRunner(bridge, provider, providerError);
+  const runner = createAgentRunner(bridge, provider, providerError, config.llm?.timeoutMs);
   bridge.onExtensionFrame((frame) => runner.handle(frame));
   bridge.onExtensionGone(() => runner.stopAll());
 }

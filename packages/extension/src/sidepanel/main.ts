@@ -14,6 +14,9 @@ const sendEl = $<HTMLButtonElement>("send");
 
 let transcript: TranscriptEntry[] = [];
 let running = false;
+/** Ultima senal de vida del agente, para poder decir cuanto lleva callado. */
+let lastSignAt = Date.now();
+let activityTimer: ReturnType<typeof setInterval> | null = null;
 
 const port = chrome.runtime.connect({ name: PANEL_PORT });
 const post = (message: PanelMessage): void => port.postMessage(message);
@@ -108,6 +111,41 @@ function confirmCard(entry: TranscriptEntry & { kind: "confirm" }): HTMLElement 
   return box;
 }
 
+/**
+ * Con proveedores lentos pasan mas de 50 s entre el envio y el primer byte. Sin contador no hay
+ * forma de saber si el agente sigue vivo, asi que se dice que esta haciendo y cuanto lleva sin dar
+ * senales; cada evento que llega pone el contador a cero.
+ */
+function activityLabel(): string {
+  const last = transcript[transcript.length - 1];
+  const what =
+    last?.kind === "tool" && last.ok === undefined
+      ? `Ejecutando ${last.name}`
+      : last?.kind === "assistant" && last.text
+        ? "Escribiendo"
+        : "Pensando";
+  const seconds = Math.round((Date.now() - lastSignAt) / 1_000);
+  return seconds < 3 ? `${what}...` : `${what}... ${seconds}s`;
+}
+
+/** Esperando a que pulses Publicar o Cancelar: el que tarda eres tu, no el agente. */
+function waitingOnUser(): boolean {
+  const last = transcript[transcript.length - 1];
+  return last?.kind === "confirm" && !last.answered;
+}
+
+function refreshActivity(): void {
+  const active = running && !waitingOnUser();
+  $("activity").hidden = !active;
+  if (!active) {
+    if (activityTimer) clearInterval(activityTimer);
+    activityTimer = null;
+    return;
+  }
+  $("activity-text").textContent = activityLabel();
+  activityTimer ??= setInterval(() => ($("activity-text").textContent = activityLabel()), 1_000);
+}
+
 function render(): void {
   // El usuario puede estar leyendo algo mas arriba: solo se sigue el final si ya estaba ahi.
   const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 40;
@@ -151,6 +189,7 @@ function render(): void {
 
   sendEl.textContent = running ? "Detener" : "Enviar";
   sendEl.classList.toggle("stop", running);
+  refreshActivity();
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
 
@@ -166,10 +205,12 @@ port.onMessage.addListener((update: PanelUpdate) => {
   switch (update.type) {
     case "snapshot":
       transcript = update.transcript;
+      if (!running && update.running) lastSignAt = Date.now();
       running = update.running;
       break;
     case "event":
       transcript = applyEvent(transcript, update.event);
+      lastSignAt = Date.now();
       if (update.event.type === "done" || update.event.type === "error") running = false;
       break;
     case "running":

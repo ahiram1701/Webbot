@@ -14,6 +14,8 @@ export interface LlmConfig {
   apiKey: string;
   baseUrl: string;
   thinking: boolean;
+  /** Techo por turno del modelo, en ms. */
+  timeoutMs: number;
 }
 
 /**

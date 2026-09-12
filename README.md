@@ -102,9 +102,10 @@ WEBBOT_LLM_MODEL=gpt-4.1
 # OpenRouter, Groq, DeepSeek, Mistral, la capa compatible de Gemini...
 WEBBOT_LLM_BASE_URL=https://openrouter.ai/api/v1
 
-# NVIDIA NIM (clave nvapi-...)
+# NVIDIA NIM (clave nvapi-...). El catalogo retira modelos: si uno devuelve 410,
+# mira cuales quedan en https://integrate.api.nvidia.com/v1/models
 WEBBOT_LLM_BASE_URL=https://integrate.api.nvidia.com/v1
-WEBBOT_LLM_MODEL=meta/llama-3.3-70b-instruct
+WEBBOT_LLM_MODEL=moonshotai/kimi-k3
 
 # Un modelo local, que además no cuesta nada: no hace falta clave
 WEBBOT_LLM_BASE_URL=http://127.0.0.1:11434/v1

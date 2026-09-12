@@ -27,7 +27,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 8;
+export const RUNTIME_VERSION = 9;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -40,7 +40,7 @@ export const RUNTIME_VERSION = 8;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 8;
+  const RUNTIME_VERSION_INNER = 9;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -231,7 +231,7 @@ export function installWebbotRuntime(): void {
   }
 
   /** Aplica todos los criterios del target como AND y ordena de mas especifico a menos. */
-  function findAll(target: Target): Element[] {
+  function findAll(target: Target, includeHidden = false): Element[] {
     let pool = queryPool(target);
     if (target.role) {
       const wanted = target.role.toLowerCase();
@@ -250,20 +250,30 @@ export function installWebbotRuntime(): void {
       pool = pool.filter((el) => !pool.some((other) => other !== el && el.contains(other)));
     }
     const visibles = pool.filter(isVisible);
-    return visibles.length > 0 ? visibles : pool;
+    if (visibles.length > 0) return visibles;
+    // Las ocultas solo salen si se piden para inspeccionar: actuar sobre algo que no se ve casi
+    // nunca hace lo que el agente cree, y antes se pulsaban elementos invisibles sin avisar.
+    return includeHidden ? pool : [];
   }
 
-  function findOne(target: Target): Element {
-    const matches = findAll(target);
+  function findOne(target: Target, includeHidden = false): Element {
+    const matches = findAll(target, includeHidden);
     const index = target.index ?? 0;
     const el = matches[index];
-    if (!el) {
-      const criterios = JSON.stringify(target);
-      throw Object.assign(new Error(`No se encontro ningun elemento para ${criterios} (coincidencias: ${matches.length}).`), {
-        webbotCode: "element_not_found",
-      });
+    if (el) return el;
+
+    const criterios = JSON.stringify(target);
+    // Distinguir "no existe" de "existe pero no se ve" le ahorra al agente perseguir un fantasma.
+    const ocultas = !includeHidden && matches.length === 0 ? findAll(target, true).length : 0;
+    if (ocultas > 0) {
+      throw Object.assign(
+        new Error(`Hay ${ocultas} coincidencia(s) para ${criterios}, pero ninguna visible: no se actua sobre lo oculto.`),
+        { webbotCode: "element_not_visible" },
+      );
     }
-    return el;
+    throw Object.assign(new Error(`No se encontro ningun elemento para ${criterios} (coincidencias: ${matches.length}).`), {
+      webbotCode: "element_not_found",
+    });
   }
 
   /** Para clics: si el elemento encontrado es un span dentro de un boton, sube al boton. */
@@ -920,7 +930,8 @@ export function installWebbotRuntime(): void {
     version: RUNTIME_VERSION_INNER,
 
     describe(target) {
-      return findAll(target).slice(0, 20).map(describeElement);
+      // Inspeccionar si ve lo oculto: es la herramienta para entender por que algo no se puede pulsar.
+      return findAll(target, true).slice(0, 20).map(describeElement);
     },
 
     outline({ maxNodes }) {

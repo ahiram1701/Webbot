@@ -151,6 +151,7 @@ export const ErrorCodes = {
   TIMEOUT: "timeout",
   DOMAIN_BLOCKED: "domain_blocked",
   ELEMENT_NOT_FOUND: "element_not_found",
+  ELEMENT_NOT_VISIBLE: "element_not_visible",
   TAB_NOT_FOUND: "tab_not_found",
   COMPOSER_NOT_FOUND: "composer_not_found",
   POST_BUTTON_DISABLED: "post_button_disabled",

@@ -78,7 +78,7 @@ function editorTipoLexical(contenido: string): { el: HTMLElement; exec: ReturnTy
 
 describe("instalacion", () => {
   it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
-    expect(api.version).toBe(8);
+    expect(api.version).toBe(9);
     expect(typeof api.click).toBe("function");
   });
 
@@ -138,6 +138,45 @@ describe("click", () => {
     } catch (error) {
       expect((error as { webbotCode?: string }).webbotCode).toBe("element_not_found");
     }
+  });
+
+  it("no pulsa un elemento oculto y distingue ese caso de que no exista", () => {
+    document.body.innerHTML = `<button id="b" style="display:none">Enviar</button>`;
+    const spy = vi.fn();
+    document.getElementById("b")?.addEventListener("click", spy);
+
+    try {
+      api.click({ target: { text: "Enviar" } });
+      throw new Error("deberia haber lanzado");
+    } catch (error) {
+      expect((error as { webbotCode?: string }).webbotCode).toBe("element_not_visible");
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("prefiere la coincidencia visible cuando hay otra oculta con el mismo texto", () => {
+    document.body.innerHTML = `
+      <button id="oculto" style="display:none">Publicar</button>
+      <button id="visible">Publicar</button>`;
+    const enOculto = vi.fn();
+    const enVisible = vi.fn();
+    document.getElementById("oculto")?.addEventListener("click", enOculto);
+    document.getElementById("visible")?.addEventListener("click", enVisible);
+
+    api.click({ target: { text: "Publicar" } });
+
+    expect(enOculto).not.toHaveBeenCalled();
+    expect(enVisible).toHaveBeenCalledOnce();
+  });
+
+  it("describe si deja inspeccionar un elemento oculto", () => {
+    document.body.innerHTML = `<button id="b" style="display:none">Enviar</button>`;
+
+    const result = api.describe({ text: "Enviar" }) as Array<{ visible: boolean; tag: string }>;
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.tag).toBe("button");
+    expect(result[0]?.visible).toBe(false);
   });
 
   it("se niega a pulsar un elemento deshabilitado", () => {

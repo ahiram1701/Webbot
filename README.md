@@ -228,6 +228,7 @@ cliente MCP lo lanza como subproceso local y envolverlo en `docker run -i` solo 
 | "Token rechazado" | El de Opciones no coincide con `WEBBOT_TOKEN` del `.env`. |
 | `domain_blocked` | Falta el dominio en la allowlist de Opciones. |
 | `element_not_found` | Llama a `webbot_outline` y usa el selector que devuelve. |
+| `element_not_visible` | El elemento existe pero está oculto: solo se actúa sobre lo visible. |
 | `composer_not_found` | No hay sesión iniciada en la red, o cambió su UI: revisa `SOCIAL`. |
 | `post_button_disabled` | El texto no llegó al editor, o supera el límite de caracteres. |
 | `account_required` | Falta `expectedAccount` para publicar: haz antes un `dryRun` y usa su `account`. |

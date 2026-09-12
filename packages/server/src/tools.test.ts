@@ -15,6 +15,7 @@ const SAMPLES: Record<string, unknown> = {
   webbot_extract: { tabId: 7, mode: "readable" },
   webbot_links: { tabId: 7, contains: "docs" },
   webbot_outline: { tabId: 7, maxNodes: 50 },
+  webbot_describe: { tabId: 7, target: { text: "Enviar" } },
   webbot_screenshot: { tabId: 7 },
   webbot_click: { tabId: 7, target: { text: "Aceptar" } },
   webbot_type: { tabId: 7, target: { css: "input" }, text: "hola", submit: true },

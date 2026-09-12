@@ -108,10 +108,21 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
     name: "webbot_outline",
     description:
       "Radiografia de los elementos interactivos de la pagina: rol, nombre accesible, texto, si es visible y un " +
-      "selector sugerido para cada uno. USA ESTO ANTES de webbot_click o webbot_type para saber que existe " +
-      "realmente en la pagina en vez de adivinar selectores.",
+      "selector sugerido para cada uno. USA ESTO ANTES del primer clic para saber que existe realmente en vez de " +
+      "adivinar selectores. Si hay un dialogo o banner abierto lo devuelve en 'dialog': mientras este ahi, lo " +
+      "demas de la lista no se puede pulsar.",
     shape: { tabId, maxNodes: z.number().int().positive().optional().describe("Por defecto 200.") },
     toCommand: ({ tabId: id, maxNodes }) => ({ type: "page.outline", tabId: id, maxNodes }),
+  }),
+
+  tool({
+    name: "webbot_describe",
+    description:
+      "Inspecciona los elementos que encajan con un target, INCLUIDOS LOS OCULTOS. Es la herramienta para " +
+      "averiguar por que algo no se deja pulsar: dice si cada coincidencia es visible y si esta deshabilitada. " +
+      "Usala cuando un clic falle con element_not_found o element_not_visible, antes de reintentar a ciegas.",
+    shape: { tabId, target: TargetSchema },
+    toCommand: ({ tabId: id, target }) => ({ type: "page.describe", tabId: id, target }),
   }),
 
   tool({
@@ -125,11 +136,19 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
     name: "webbot_click",
     description:
       "Hace clic en un elemento (boton, enlace, checkbox...). Lo desplaza a la vista y dispara un clic real. " +
-      "Devuelve el elemento sobre el que actuo y la URL resultante por si la navegacion cambio.",
+      "Espera a que la pagina reaccione y devuelve en 'after' que provoco: url y titulo nuevos, los elementos " +
+      "que aparecieron y desaparecieron, y el dialogo abierto si lo hay. NO hace falta un webbot_outline " +
+      "detras: leer 'after' es mas barato y ademas refleja la pagina ya repintada.",
     shape: {
       tabId,
       target: TargetSchema,
-      waitAfterMs: z.number().int().min(0).max(30_000).optional().describe("Pausa tras el clic. Por defecto 500 ms."),
+      waitAfterMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(30_000)
+        .optional()
+        .describe("Pausa EXTRA tras el clic. No suele hacer falta: ya se espera a que la pagina se asiente."),
     },
     toCommand: ({ tabId: id, target, waitAfterMs }) => ({ type: "page.click", tabId: id, target, waitAfterMs }),
   }),
@@ -139,7 +158,8 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
     description:
       "Escribe texto en un input, textarea o contenteditable, disparando los eventos que esperan React/Vue " +
       "(no basta con asignar el valor). submit:true envia el formulario con Enter al terminar. " +
-      "Con clear:true y text vacio limpia el campo, tambien en editores como los composers de Facebook y X.",
+      "Con clear:true y text vacio limpia el campo, tambien en editores como los composers de Facebook y X. " +
+      "Devuelve 'after' con lo que cambio en la pagina, igual que webbot_click.",
     shape: {
       tabId,
       target: TargetSchema,
@@ -226,6 +246,9 @@ export const WEBBOT_TOOLS_BY_NAME = new Map(WEBBOT_TOOLS.map((entry) => [entry.n
 const CONDUCIR = [
   "Webbot conduce el Chrome del usuario a traves de una extension MV3: extrae texto, hace clic y escribe en paginas, y publica en Facebook/X.",
   "Flujo tipico: 1) webbot_list_tabs o webbot_open_tab para tener un tabId. 2) webbot_outline para VER que hay en la pagina y descubrir el selector del boton o campo. 3) webbot_click / webbot_type para actuar. 4) webbot_extract para leer el resultado.",
+  "webbot_click, webbot_type y webbot_scroll esperan a que la pagina se asiente y devuelven en 'after' la url y el titulo nuevos, que elementos aparecieron y cuales desaparecieron, y el dialogo abierto si lo hay. Encadena leyendo ese 'after' en vez de repetir webbot_outline tras cada accion: gastas la mitad de pasos y ademas ves la pagina ya repintada.",
+  "Si 'after.dialog' no es null hay una capa encima bloqueando la pagina (un banner de cookies, un modal): resuelvela primero pulsando algo de 'dialog.elements', porque hasta entonces lo demas no responde.",
+  "Cuando un clic falle con element_not_found o element_not_visible, usa webbot_describe con ese mismo target antes de reintentar: ve tambien los elementos ocultos y dice si estan deshabilitados.",
   "webbot_outline es la herramienta clave antes de interactuar: devuelve roles, textos y un selector sugerido por elemento. No adivines selectores, miralos primero.",
   "Los targets aceptan css, xpath, text, role o name y se combinan como AND; usa 'index' para desempatar.",
   "webbot_extract aplica automaticamente un perfil por dominio si existe; el campo 'selectors' de la llamada lo sobrescribe.",

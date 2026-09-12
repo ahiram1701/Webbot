@@ -154,7 +154,8 @@ Se añade el hostname exacto, no el dominio padre: permitir `gist.github.com` no
 | `webbot_status` | Estado de la conexión, allowlist y flujos. Empieza por aquí si algo falla. |
 | `webbot_list_tabs` | Pestañas abiertas con su `tabId` y si están permitidas. |
 | `webbot_open_tab` / `webbot_close_tab` / `webbot_navigate` | Gestión de pestañas. |
-| `webbot_outline` | Radiografía de los elementos interactivos, con selector sugerido. |
+| `webbot_outline` | Radiografía de los elementos interactivos, con selector sugerido. Avisa del diálogo abierto. |
+| `webbot_describe` | Inspecciona un target **incluidos los elementos ocultos**: por qué algo no se deja pulsar. |
 | `webbot_extract` | Texto de la página: `readable`, `full` o `selectors`. |
 | `webbot_links` | Enlaces con filtro por texto o por dominio propio. |
 | `webbot_screenshot` | Captura PNG de la parte visible. |
@@ -164,6 +165,29 @@ Se añade el hostname exacto, no el dominio padre: permitir `gist.github.com` no
 
 El orden que funciona es siempre el mismo: `webbot_outline` para **ver** qué hay en la página y
 después `webbot_click` o `webbot_type` sobre lo que has visto. Adivinar selectores no sale bien.
+
+Pero **solo hace falta un `webbot_outline`, al principio**. `webbot_click`, `webbot_type` y
+`webbot_scroll` esperan a que la página se asiente y devuelven en `after` lo que provocaron:
+
+```json
+{ "clicked": { "tag": "button", "name": "Aceptar todo" },
+  "after": {
+    "url": "https://ejemplo.com/", "title": "Ejemplo",
+    "appeared": [{ "role": "button", "name": "Descargar" }],
+    "disappeared": ["button|Aceptar todo", "button|Rechazar"],
+    "dialog": null } }
+```
+
+Encadenar leyendo ese `after` gasta la mitad de pasos que repetir el outline, y además refleja la
+página **ya repintada**: la espera no es una pausa fija sino un `MutationObserver` que vuelve
+cuando el DOM lleva 250 ms sin cambiar, con techo de 2 s.
+
+Los cambios se identifican por rol y nombre accesible, nunca por el selector: un React cualquiera
+reescribe los selectores en cada render, y entonces el repintado más tonto parecería una página
+entera nueva.
+
+`dialog` es la pieza que desatasca banners de cookies y modales. Si no es `null`, hay una capa
+encima bloqueando el resto y viene con lo que se puede pulsar dentro.
 
 ### Localizar elementos
 

@@ -73,6 +73,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("page.links"), tabId, contains: z.string().optional(), sameOrigin: z.boolean().optional() }),
   z.object({ type: z.literal("page.outline"), tabId, maxNodes: z.number().int().positive().optional() }),
+  z.object({ type: z.literal("page.describe"), tabId, target: TargetSchema }),
   z.object({ type: z.literal("page.click"), tabId, target: TargetSchema, waitAfterMs: z.number().int().optional() }),
   z.object({
     type: z.literal("page.type"),

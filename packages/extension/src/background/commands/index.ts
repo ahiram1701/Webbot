@@ -109,7 +109,7 @@ async function runFlowStep(
       const tabId = needTab();
       await requireAllowedTab(tabId, settings.allowlist);
       const result = await callRuntime(tabId, "click", { target: step.target });
-      await sleep(step.waitAfterMs ?? 500);
+      if (step.waitAfterMs) await sleep(step.waitAfterMs);
       return result;
     }
     case "type": {
@@ -221,12 +221,18 @@ export async function runCommand(command: Command, context: CommandContext): Pro
       return callRuntime(command.tabId, "outline", { maxNodes: command.maxNodes });
     }
 
+    case "page.describe": {
+      await requireAllowedTab(command.tabId, settings.allowlist);
+      return callRuntime(command.tabId, "describe", { target: command.target });
+    }
+
     case "page.click": {
       await requireAllowedTab(command.tabId, settings.allowlist);
+      // Ya no hay espera fija: el runtime aguarda a que la pagina se asiente y devuelve en
+      // 'after' lo que cambio. waitAfterMs se respeta como espera extra para quien la pida.
       const result = await callRuntime(command.tabId, "click", { target: command.target });
-      await sleep(command.waitAfterMs ?? 500);
-      const tab = await getTab(command.tabId);
-      return { ...(result as object), url: tab.url ?? "", title: tab.title ?? "" };
+      if (command.waitAfterMs) await sleep(command.waitAfterMs);
+      return result;
     }
 
     case "page.type": {

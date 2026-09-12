@@ -12,9 +12,10 @@ export interface WebbotApi {
     maxChars?: number;
   }): unknown;
   links(options: { contains?: string; sameOrigin?: boolean }): unknown;
-  click(options: { target: Target }): unknown;
-  type(options: { target: Target; text: string; clear?: boolean; submit?: boolean }): unknown;
-  scroll(options: { direction: "up" | "down" | "top" | "bottom"; amount?: number }): unknown;
+  /** Las tres devuelven promesa: esperan a que la pagina se asiente para poder contar que cambio. */
+  click(options: { target: Target }): Promise<unknown>;
+  type(options: { target: Target; text: string; clear?: boolean; submit?: boolean }): Promise<unknown>;
+  scroll(options: { direction: "up" | "down" | "top" | "bottom"; amount?: number }): Promise<unknown>;
   waitFor(options: { target: Target; timeoutMs?: number }): Promise<unknown>;
   postSocial(options: {
     network: Network;
@@ -27,7 +28,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 9;
+export const RUNTIME_VERSION = 10;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -40,7 +41,7 @@ export const RUNTIME_VERSION = 9;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 9;
+  const RUNTIME_VERSION_INNER = 10;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -210,6 +211,111 @@ export function installWebbotRuntime(): void {
       selector: cssPath(el),
       visible: isVisible(el),
       disabled: el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true",
+    };
+  }
+
+  /** Tope de elementos que se comparan antes y despues de actuar. */
+  const SNAPSHOT_LIMIT = 300;
+  /** Cuantos cambios se cuentan uno a uno antes de resumir el resto. */
+  const DIFF_LIMIT = 15;
+  const DIALOG_SELECTOR = '[aria-modal="true"], [role="dialog"], [role="alertdialog"], dialog[open]';
+
+  /**
+   * Espera a que el DOM deje de cambiar. Es la pregunta contraria a la de until(): no "cuando
+   * aparezca esto" —donde la espera activa aguanta mejor un repintado completo— sino "cuando pare
+   * todo", que es justo para lo que sirve un MutationObserver. Resuelve tras `quietMs` sin
+   * mutaciones, o al llegar al techo si la pagina no se calla nunca.
+   */
+  function settle(quietMs = 250, maxMs = 2_000): Promise<void> {
+    return new Promise((resolve) => {
+      let quiet: ReturnType<typeof setTimeout> | undefined;
+      let cap: ReturnType<typeof setTimeout> | undefined;
+      function done(): void {
+        if (quiet) clearTimeout(quiet);
+        if (cap) clearTimeout(cap);
+        observer.disconnect();
+        resolve();
+      }
+      const observer = new MutationObserver(() => {
+        if (quiet) clearTimeout(quiet);
+        quiet = setTimeout(done, quietMs);
+      });
+      cap = setTimeout(done, maxMs);
+      quiet = setTimeout(done, quietMs);
+      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+    });
+  }
+
+  /**
+   * Elementos interactivos que merece la pena ensenar. Lo usan outline y la comparacion posterior a
+   * cada accion: si barrieran distinto, el "ha aparecido esto" mentiria.
+   */
+  function interactiveElements(limit: number): Element[] {
+    const found: Element[] = [];
+    const seen = new Set<Element>();
+    for (const el of Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR))) {
+      if (found.length >= limit) break;
+      if (seen.has(el) || !isVisible(el)) continue;
+      const role = roleOf(el);
+      if (role === "generic" && !el.hasAttribute("onclick")) continue;
+      if (!accessibleName(el) && role !== "textbox") continue;
+      seen.add(el);
+      found.push(el);
+    }
+    return found;
+  }
+
+  /**
+   * Clave por rol y nombre, nunca por selector: un React cualquiera reescribe los selectores en
+   * cada render, y entonces el repintado mas tonto pareceria una pagina entera nueva.
+   */
+  function snapshot(): Map<string, Element> {
+    const map = new Map<string, Element>();
+    for (const el of interactiveElements(SNAPSHOT_LIMIT)) {
+      const key = `${roleOf(el)}|${accessibleName(el).slice(0, 120)}`;
+      if (!map.has(key)) map.set(key, el);
+    }
+    return map;
+  }
+
+  /**
+   * La capa que esta tapando la pagina, si la hay, con lo que se puede pulsar dentro. Sin esto el
+   * modelo recibe una lista plana de elementos y no tiene forma de saber que hay un banner de
+   * cookies encima bloqueandolos todos.
+   */
+  function openDialog(): Record<string, unknown> | null {
+    const el = Array.from(document.querySelectorAll(DIALOG_SELECTOR)).find(isVisible);
+    if (!el) return null;
+    const inside = Array.from(el.querySelectorAll(INTERACTIVE_SELECTOR))
+      .filter((child) => isVisible(child) && (Boolean(accessibleName(child)) || roleOf(child) === "textbox"))
+      .slice(0, 20)
+      .map(describeElement);
+    return { ...describeElement(el), elements: inside };
+  }
+
+  /**
+   * Que provoco la accion. Es lo que evita tener que gastar otro paso en outline detras de cada
+   * clic, y lo que garantiza que lo que se lea sea el DOM de despues del repintado y no el de antes.
+   */
+  async function pageAfter(before: Map<string, Element>): Promise<Record<string, unknown>> {
+    await settle();
+    const after = snapshot();
+    const appeared: Record<string, unknown>[] = [];
+    const disappeared: string[] = [];
+    for (const [key, el] of after) if (!before.has(key)) appeared.push(describeElement(el));
+    for (const key of before.keys()) if (!after.has(key)) disappeared.push(key);
+
+    const extra: Record<string, unknown> = {};
+    if (appeared.length > DIFF_LIMIT) extra.appearedMore = appeared.length - DIFF_LIMIT;
+    if (disappeared.length > DIFF_LIMIT) extra.disappearedMore = disappeared.length - DIFF_LIMIT;
+
+    return {
+      url: location.href,
+      title: document.title,
+      appeared: appeared.slice(0, DIFF_LIMIT),
+      disappeared: disappeared.slice(0, DIFF_LIMIT),
+      dialog: openDialog(),
+      ...extra,
     };
   }
 
@@ -935,20 +1041,9 @@ export function installWebbotRuntime(): void {
     },
 
     outline({ maxNodes }) {
-      const limit = maxNodes ?? 200;
-      const seen = new Set<Element>();
-      const nodes: Record<string, unknown>[] = [];
-      for (const el of Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR))) {
-        if (nodes.length >= limit) break;
-        if (seen.has(el) || !isVisible(el)) continue;
-        const role = roleOf(el);
-        if (role === "generic" && !el.hasAttribute("onclick")) continue;
-        const name = accessibleName(el);
-        if (!name && role !== "textbox") continue;
-        seen.add(el);
-        nodes.push({ index: nodes.length, ...describeElement(el) });
-      }
-      return { url: location.href, title: document.title, count: nodes.length, elements: nodes };
+      const nodes = interactiveElements(maxNodes ?? 200).map((el, index) => ({ index, ...describeElement(el) }));
+      // El dialogo abierto se dice aparte: mientras lo haya, lo demas de la lista no se puede pulsar.
+      return { url: location.href, title: document.title, count: nodes.length, elements: nodes, dialog: openDialog() };
     },
 
     extract({ mode, selectors, profile, maxChars }) {
@@ -1016,48 +1111,58 @@ export function installWebbotRuntime(): void {
       return { url: location.href, count: result.length, links: result.slice(0, 500) };
     },
 
-    click({ target }) {
+    async click({ target }) {
       const el = clickableFrom(findOne(target));
       el.scrollIntoView({ block: "center", inline: "center" });
-      const before = location.href;
       const described = describeElement(el);
       if (described.disabled) {
         throw Object.assign(new Error(`El elemento esta deshabilitado: ${JSON.stringify(described)}`), {
           webbotCode: "element_not_found",
         });
       }
+      // Ya no se guarda la url de antes: leerla en el mismo tick que el clic daba siempre la
+      // misma, porque el navegador todavia no habia hecho nada. 'after' la mide cuando ya paro.
+      const antes = snapshot();
       dispatchClick(el);
-      return { clicked: described, urlBefore: before, urlAfter: location.href };
+      return { clicked: described, after: await pageAfter(antes) };
     },
 
-    type({ target, text, clear, submit }) {
+    async type({ target, text, clear, submit }) {
       const el = findOne(target);
       el.scrollIntoView({ block: "center" });
-      const finish = () => {
-        if (submit) {
-          const init = { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 };
-          el.dispatchEvent(new KeyboardEvent("keydown", init));
-          el.dispatchEvent(new KeyboardEvent("keypress", init));
-          el.dispatchEvent(new KeyboardEvent("keyup", init));
-          if (el instanceof HTMLInputElement) el.form?.requestSubmit?.();
-        }
-        const value = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : visibleText(el);
-        return { typed: describeElement(el), value: value.slice(0, 500), submitted: Boolean(submit) };
-      };
-      // Lexical necesita esperar a su propio "seleccionar todo", asi que ese camino es asincrono. El
-      // resto sigue siendo sincrono, y un elemento que no admite texto falla en el acto.
+      const antes = snapshot();
+
+      // Lexical necesita esperar a su propio "seleccionar todo"; el resto escribe en el acto. Un
+      // elemento que no admite texto sigue fallando antes de tocar nada, ahora como rechazo.
       const lexical = (clear ?? true) ? lexicalRoot(el) : null;
-      if (lexical) return setLexicalText(lexical, text).then(finish);
-      setText(el, text, clear ?? true);
-      return finish();
+      if (lexical) await setLexicalText(lexical, text);
+      else setText(el, text, clear ?? true);
+
+      if (submit) {
+        const init = { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 };
+        el.dispatchEvent(new KeyboardEvent("keydown", init));
+        el.dispatchEvent(new KeyboardEvent("keypress", init));
+        el.dispatchEvent(new KeyboardEvent("keyup", init));
+        if (el instanceof HTMLInputElement) el.form?.requestSubmit?.();
+      }
+      const value = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : visibleText(el);
+      return {
+        typed: describeElement(el),
+        value: value.slice(0, 500),
+        submitted: Boolean(submit),
+        after: await pageAfter(antes),
+      };
     },
 
-    scroll({ direction, amount }) {
+    async scroll({ direction, amount }) {
       const step = amount ?? window.innerHeight;
+      const antes = snapshot();
       if (direction === "top") window.scrollTo({ top: 0 });
       else if (direction === "bottom") window.scrollTo({ top: document.body.scrollHeight });
       else window.scrollBy({ top: direction === "down" ? step : -step });
-      return { scrollY: window.scrollY, scrollHeight: document.body.scrollHeight };
+      // Bajar suele cargar contenido nuevo: aqui el diff es justo lo que hay que ver.
+      const after = await pageAfter(antes);
+      return { scrollY: window.scrollY, scrollHeight: document.body.scrollHeight, after };
     },
 
     async waitFor({ target, timeoutMs }) {

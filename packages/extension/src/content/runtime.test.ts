@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { installWebbotRuntime, type WebbotApi } from "./runtime.js";
+import { installWebbotRuntime, RUNTIME_VERSION, type WebbotApi } from "./runtime.js";
 
 /**
  * El runtime viaja a la pagina como TEXTO (chrome.scripting.executeScript solo serializa la
@@ -78,7 +78,9 @@ function editorTipoLexical(contenido: string): { el: HTMLElement; exec: ReturnTy
 
 describe("instalacion", () => {
   it("se instala a partir de su propio codigo fuente, sin depender del modulo", () => {
-    expect(api.version).toBe(9);
+    // Atado a la constante: el runtime lleva su version duplicada dentro (no puede leer el
+    // modulo), asi que esto tambien vigila que las dos copias no se separen.
+    expect(api.version).toBe(RUNTIME_VERSION);
     expect(typeof api.click).toBe("function");
   });
 
@@ -90,34 +92,34 @@ describe("instalacion", () => {
 });
 
 describe("click", () => {
-  it("hace clic en un boton localizado por texto", () => {
+  it("hace clic en un boton localizado por texto", async () => {
     document.body.innerHTML = `<button id="b">Aceptar todo</button>`;
     const spy = vi.fn();
     document.getElementById("b")?.addEventListener("click", spy);
 
-    const result = api.click({ target: { text: "Aceptar" } }) as { clicked: { tag: string } };
+    const result = (await api.click({ target: { text: "Aceptar" } })) as { clicked: { tag: string } };
 
     expect(spy).toHaveBeenCalledOnce();
     expect(result.clicked.tag).toBe("button");
   });
 
-  it("sube del span al boton que lo contiene", () => {
+  it("sube del span al boton que lo contiene", async () => {
     document.body.innerHTML = `<button id="b"><span>Publicar</span></button>`;
     const spy = vi.fn();
     document.getElementById("b")?.addEventListener("click", spy);
 
-    const result = api.click({ target: { text: "Publicar" } }) as { clicked: { tag: string } };
+    const result = (await api.click({ target: { text: "Publicar" } })) as { clicked: { tag: string } };
 
     expect(spy).toHaveBeenCalledOnce();
     expect(result.clicked.tag).toBe("button");
   });
 
-  it("encuentra el texto ignorando acentos y mayusculas", () => {
+  it("encuentra el texto ignorando acentos y mayusculas", async () => {
     document.body.innerHTML = `<button>Publicación</button>`;
-    expect(() => api.click({ target: { text: "publicacion" } })).not.toThrow();
+    await expect(api.click({ target: { text: "publicacion" } })).resolves.toBeTruthy();
   });
 
-  it("dispara pointerdown ademas de click, como esperan las UIs modernas", () => {
+  it("dispara pointerdown ademas de click, como esperan las UIs modernas", async () => {
     document.body.innerHTML = `<button id="b">Ir</button>`;
     const orden: string[] = [];
     const el = document.getElementById("b");
@@ -125,28 +127,28 @@ describe("click", () => {
       el?.addEventListener(type, () => orden.push(type));
     }
 
-    api.click({ target: { css: "#b" } });
+    await api.click({ target: { css: "#b" } });
 
     expect(orden).toEqual(["pointerdown", "mousedown", "mouseup", "click"]);
   });
 
-  it("falla con element_not_found si no hay coincidencias", () => {
+  it("falla con element_not_found si no hay coincidencias", async () => {
     document.body.innerHTML = `<button>Otro</button>`;
     try {
-      api.click({ target: { text: "No existe" } });
+      await api.click({ target: { text: "No existe" } });
       throw new Error("deberia haber lanzado");
     } catch (error) {
       expect((error as { webbotCode?: string }).webbotCode).toBe("element_not_found");
     }
   });
 
-  it("no pulsa un elemento oculto y distingue ese caso de que no exista", () => {
+  it("no pulsa un elemento oculto y distingue ese caso de que no exista", async () => {
     document.body.innerHTML = `<button id="b" style="display:none">Enviar</button>`;
     const spy = vi.fn();
     document.getElementById("b")?.addEventListener("click", spy);
 
     try {
-      api.click({ target: { text: "Enviar" } });
+      await api.click({ target: { text: "Enviar" } });
       throw new Error("deberia haber lanzado");
     } catch (error) {
       expect((error as { webbotCode?: string }).webbotCode).toBe("element_not_visible");
@@ -154,7 +156,7 @@ describe("click", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("prefiere la coincidencia visible cuando hay otra oculta con el mismo texto", () => {
+  it("prefiere la coincidencia visible cuando hay otra oculta con el mismo texto", async () => {
     document.body.innerHTML = `
       <button id="oculto" style="display:none">Publicar</button>
       <button id="visible">Publicar</button>`;
@@ -163,7 +165,7 @@ describe("click", () => {
     document.getElementById("oculto")?.addEventListener("click", enOculto);
     document.getElementById("visible")?.addEventListener("click", enVisible);
 
-    api.click({ target: { text: "Publicar" } });
+    await api.click({ target: { text: "Publicar" } });
 
     expect(enOculto).not.toHaveBeenCalled();
     expect(enVisible).toHaveBeenCalledOnce();
@@ -179,38 +181,38 @@ describe("click", () => {
     expect(result[0]?.visible).toBe(false);
   });
 
-  it("se niega a pulsar un elemento deshabilitado", () => {
+  it("se niega a pulsar un elemento deshabilitado", async () => {
     document.body.innerHTML = `<button disabled>Enviar</button>`;
-    expect(() => api.click({ target: { text: "Enviar" } })).toThrow(/deshabilitado/i);
+    await expect(api.click({ target: { text: "Enviar" } })).rejects.toThrow(/deshabilitado/i);
   });
 });
 
 describe("type", () => {
-  it("escribe en un input y notifica el evento input", () => {
+  it("escribe en un input y notifica el evento input", async () => {
     document.body.innerHTML = `<input id="q" value="viejo" />`;
     const input = document.getElementById("q") as HTMLInputElement;
     const spy = vi.fn();
     input.addEventListener("input", spy);
 
-    api.type({ target: { css: "#q" }, text: "nuevo", clear: true });
+    await api.type({ target: { css: "#q" }, text: "nuevo", clear: true });
 
     expect(input.value).toBe("nuevo");
     expect(spy).toHaveBeenCalled();
   });
 
-  it("anade al final cuando clear es false", () => {
+  it("anade al final cuando clear es false", async () => {
     document.body.innerHTML = `<input id="q" value="hola " />`;
-    api.type({ target: { css: "#q" }, text: "mundo", clear: false });
+    await api.type({ target: { css: "#q" }, text: "mundo", clear: false });
     expect((document.getElementById("q") as HTMLInputElement).value).toBe("hola mundo");
   });
 
-  it("escribe en un contenteditable", () => {
+  it("escribe en un contenteditable", async () => {
     document.body.innerHTML = `<div id="c" contenteditable="true"></div>`;
-    api.type({ target: { css: "#c" }, text: "un post", clear: true });
+    await api.type({ target: { css: "#c" }, text: "un post", clear: true });
     expect(document.getElementById("c")?.textContent).toBe("un post");
   });
 
-  it("vacia un contenteditable con clear y texto vacio, borrando en vez de insertar nada", () => {
+  it("vacia un contenteditable con clear y texto vacio, borrando en vez de insertar nada", async () => {
     // Visto en vivo con el borrador que Facebook guarda en su composer: en Chrome,
     // execCommand("insertText", "") devuelve true pero no borra la seleccion.
     document.body.innerHTML = `<div id="c" contenteditable="true">borrador guardado</div>`;
@@ -221,7 +223,7 @@ describe("type", () => {
     });
     Object.defineProperty(document, "execCommand", { configurable: true, value: exec });
     try {
-      api.type({ target: { css: "#c" }, text: "", clear: true });
+      await api.type({ target: { css: "#c" }, text: "", clear: true });
     } finally {
       delete (document as { execCommand?: unknown }).execCommand;
     }
@@ -230,9 +232,9 @@ describe("type", () => {
     expect(el.textContent).toBe("");
   });
 
-  it("vacia un contenteditable aunque no exista execCommand", () => {
+  it("vacia un contenteditable aunque no exista execCommand", async () => {
     document.body.innerHTML = `<div id="c" contenteditable="true">borrador guardado</div>`;
-    api.type({ target: { css: "#c" }, text: "", clear: true });
+    await api.type({ target: { css: "#c" }, text: "", clear: true });
     expect(document.getElementById("c")?.textContent).toBe("");
   });
 
@@ -254,9 +256,106 @@ describe("type", () => {
     expect(el.textContent).toBe("alfa");
   });
 
-  it("rechaza elementos que no admiten texto", () => {
+  it("rechaza elementos que no admiten texto", async () => {
     document.body.innerHTML = `<p id="p">texto</p>`;
-    expect(() => api.type({ target: { css: "#p" }, text: "x" })).toThrow(/no admite escritura/i);
+    await expect(api.type({ target: { css: "#p" }, text: "x" })).rejects.toThrow(/no admite escritura/i);
+  });
+});
+
+/**
+ * Lo que devuelve una accion sobre el estado de despues. Es el nucleo de que el agente no tenga que
+ * gastar un outline detras de cada clic para enterarse de lo que provoco.
+ */
+interface Despues {
+  after: {
+    url: string;
+    title: string;
+    appeared: Array<{ tag: string; role: string; name: string }>;
+    disappeared: string[];
+    dialog: null | { role: string; elements: Array<{ name: string }> };
+  };
+}
+
+describe("observacion posterior a la accion", () => {
+  it("cuenta los elementos que aparecieron al pulsar", async () => {
+    document.body.innerHTML = `<button id="abrir">Abrir menu</button>`;
+    document.getElementById("abrir")?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML("beforeend", `<button>Descargar</button><button>Compartir</button>`);
+    });
+
+    const result = (await api.click({ target: { text: "Abrir menu" } })) as Despues;
+
+    expect(result.after.appeared.map((el) => el.name)).toEqual(["Descargar", "Compartir"]);
+    expect(result.after.disappeared).toEqual([]);
+  });
+
+  it("cuenta los que desaparecieron, que es como se sabe que un banner se cerro", async () => {
+    document.body.innerHTML = `
+      <div id="banner"><button id="ok">Aceptar todo</button><button>Rechazar</button></div>`;
+    document.getElementById("ok")?.addEventListener("click", () => {
+      document.getElementById("banner")?.remove();
+    });
+
+    const result = (await api.click({ target: { text: "Aceptar todo" } })) as Despues;
+
+    expect(result.after.disappeared).toContain("button|Aceptar todo");
+    expect(result.after.disappeared).toContain("button|Rechazar");
+    expect(result.after.dialog).toBeNull();
+  });
+
+  it("avisa del dialogo que esta tapando la pagina, con lo que se puede pulsar dentro", async () => {
+    document.body.innerHTML = `<button id="abrir">Configurar</button>`;
+    document.getElementById("abrir")?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div role="dialog" aria-label="Preferencias"><button>Guardar</button><button>Cancelar</button></div>`,
+      );
+    });
+
+    const result = (await api.click({ target: { text: "Configurar" } })) as Despues;
+
+    expect(result.after.dialog?.role).toBe("dialog");
+    expect(result.after.dialog?.elements.map((el) => el.name)).toEqual(["Guardar", "Cancelar"]);
+  });
+
+  it("un repintado que solo cambia los selectores no se reporta como cambio", async () => {
+    // Es lo que hace cualquier React al re-renderizar. Si la clave fuera el selector, aqui saldria
+    // la pagina entera como nueva y el agente creeria que su clic hizo algo que no hizo.
+    document.body.innerHTML = `
+      <button id="ir">Ir</button>
+      <div id="lista"><button class="r1">Uno</button><button class="r1">Dos</button></div>`;
+    document.getElementById("ir")?.addEventListener("click", () => {
+      const lista = document.getElementById("lista") as HTMLElement;
+      lista.innerHTML = `<button class="r2">Uno</button><button class="r2">Dos</button>`;
+    });
+
+    const result = (await api.click({ target: { text: "Ir" } })) as Despues;
+
+    expect(result.after.appeared).toEqual([]);
+    expect(result.after.disappeared).toEqual([]);
+  });
+
+  it("una pagina quieta no agota el techo de espera", async () => {
+    document.body.innerHTML = `<button>Nada</button>`;
+
+    const empezo = Date.now();
+    await api.click({ target: { text: "Nada" } });
+
+    // El techo son 2 s; con la pagina quieta tiene que volver en cuanto pasa el silencio.
+    expect(Date.now() - empezo).toBeLessThan(1_000);
+  });
+
+  it("scroll tambien dice que aparecio, que es como se ve el scroll infinito", async () => {
+    // jsdom no tiene layout: window.scrollBy no hace nada ni dispara scroll. Se sustituye la
+    // primitiva por lo que provoca en una pagina real, que es lo que aqui interesa comprobar.
+    document.body.innerHTML = `<button>Arriba</button>`;
+    window.scrollBy = () => {
+      document.body.insertAdjacentHTML("beforeend", `<button id="mas">Cargar mas</button>`);
+    };
+
+    const result = (await api.scroll({ direction: "down" })) as Despues;
+
+    expect(result.after.appeared.map((el) => el.name)).toEqual(["Cargar mas"]);
   });
 });
 

@@ -127,6 +127,17 @@ export const PanelContextSchema = z.object({
 export type PanelContext = z.infer<typeof PanelContextSchema>;
 
 /**
+ * Lo que el servidor cuenta de si mismo al conectar. Sin esto, que no haya modelo configurado solo
+ * se descubre mandando un mensaje y viendolo fallar, que es tarde y no se parece a un diagnostico.
+ */
+export const LlmStatusSchema = z.object({
+  ready: z.boolean().describe("Si el panel puede ejecutar instrucciones."),
+  model: z.string().optional().describe("Etiqueta del proveedor, p. ej. anthropic:claude-opus-5."),
+  reason: z.string().optional().describe("Por que no hay modelo, en la frase que se le ensena a la persona."),
+});
+export type LlmStatus = z.infer<typeof LlmStatusSchema>;
+
+/**
  * Lo que el servidor cuenta al panel mientras trabaja. El panel pinta cada evento segun llega, asi
  * que `text` y `reasoning` son deltas, no el mensaje entero.
  */
@@ -158,8 +169,8 @@ export type ErrorShape = z.infer<typeof ErrorShapeSchema>;
 export const FrameSchema = z.discriminatedUnion("kind", [
   /** extension -> servidor, primer frame tras conectar. */
   z.object({ kind: z.literal("hello"), token: z.string(), version: z.number().int(), agent: z.string().optional() }),
-  /** servidor -> extension, acepta el hello. */
-  z.object({ kind: z.literal("welcome"), version: z.number().int() }),
+  /** servidor -> extension, acepta el hello y se presenta. */
+  z.object({ kind: z.literal("welcome"), version: z.number().int(), llm: LlmStatusSchema.optional() }),
   /** servidor -> extension. */
   z.object({
     kind: z.literal("request"),

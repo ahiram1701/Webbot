@@ -8,6 +8,13 @@ export * from "./types.js";
 export { createAnthropicProvider } from "./anthropic.js";
 export { createOpenAiProvider } from "./openai.js";
 
+/**
+ * Lo que le falta al .env, dicho una sola vez: lo ensena el panel al conectar y tambien el bucle si
+ * llega una instruccion de todas formas.
+ */
+export const NO_LLM_MESSAGE =
+  "El servidor no tiene modelo configurado: pon WEBBOT_LLM_PROVIDER, WEBBOT_LLM_MODEL y WEBBOT_LLM_API_KEY en su .env y reinicialo.";
+
 export interface LlmConfig {
   provider: "anthropic" | "openai";
   model: string;

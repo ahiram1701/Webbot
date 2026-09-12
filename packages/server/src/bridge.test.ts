@@ -62,6 +62,23 @@ async function connectFakeExtension(
   return ws;
 }
 
+/** Se autentica y devuelve el welcome, que es donde el puente se presenta. */
+async function connectAndReadWelcome(target: Bridge): Promise<Extract<Frame, { kind: "welcome" }>> {
+  const ws = new WebSocket(`ws://127.0.0.1:${target.port}`);
+  socket = ws;
+  await new Promise<void>((resolve, reject) => {
+    ws.on("open", () => resolve());
+    ws.on("error", reject);
+  });
+  const welcome = new Promise<Extract<Frame, { kind: "welcome" }>>((resolve) => {
+    ws.on("message", (raw) => {
+      const frame = JSON.parse(raw.toString()) as Frame;
+      if (frame.kind === "welcome") resolve(frame);
+    });
+  });
+  ws.send(JSON.stringify({ kind: "hello", token: TOKEN, version: PROTOCOL_VERSION, agent: "test" } satisfies Frame));
+  return welcome;
+}
 /** El puente marca `connected` al procesar el hello, no al abrirse el socket. */
 async function waitForConnected(target: Bridge, expected = true): Promise<void> {
   for (let i = 0; i < 100; i += 1) {
@@ -98,6 +115,32 @@ describe("Bridge", () => {
     await expect(target.send({ type: "browser.listTabs" })).resolves.toEqual({ tabs: [{ id: 7 }] });
   });
 
+  it("anuncia en el welcome el modelo que tiene detras", async () => {
+    const target = await startBridge();
+    target.describeLlm({ ready: true, model: "falso:modelo" });
+
+    const welcome = await connectAndReadWelcome(target);
+
+    expect(welcome.kind).toBe("welcome");
+    expect(welcome.llm).toEqual({ ready: true, model: "falso:modelo" });
+  });
+
+  it("anuncia por que no hay modelo, para que el panel lo ensene antes de que escriban nada", async () => {
+    const target = await startBridge();
+    target.describeLlm({ ready: false, reason: "Falta la clave del modelo." });
+
+    const welcome = await connectAndReadWelcome(target);
+
+    expect(welcome.llm).toEqual({ ready: false, reason: "Falta la clave del modelo." });
+  });
+
+  it("sin describeLlm el welcome no lleva llm: un panel nuevo no debe inventarse que falta algo", async () => {
+    const target = await startBridge();
+
+    const welcome = await connectAndReadWelcome(target);
+
+    expect(welcome.llm).toBeUndefined();
+  });
   it("propaga los errores que devuelve la extension con su codigo", async () => {
     const target = await startBridge();
     await connectFakeExtension(target, {

@@ -1,7 +1,7 @@
 import { createAgentRunner } from "./agent.js";
 import type { Bridge } from "./bridge.js";
 import { config, log } from "./config.js";
-import { createProvider, LlmError } from "./llm/index.js";
+import { createProvider, LlmError, NO_LLM_MESSAGE } from "./llm/index.js";
 
 /**
  * Engancha el agente del panel al puente. Lo llaman los dos entrypoints (stdio y HTTP) para que la
@@ -21,6 +21,13 @@ export function attachAgent(bridge: Bridge): void {
 
   if (provider) log(`agente del panel listo con ${provider.label}`);
   else log("sin modelo configurado: el panel de la extension no podra ejecutar instrucciones");
+
+  // El panel lo ensena nada mas conectar, en vez de dejar que la persona lo descubra fallando.
+  bridge.describeLlm({
+    ready: provider !== null,
+    model: provider?.label,
+    reason: provider ? undefined : (providerError?.message ?? NO_LLM_MESSAGE),
+  });
 
   const runner = createAgentRunner(bridge, provider, providerError, config.llm?.timeoutMs);
   bridge.onExtensionFrame((frame) => runner.handle(frame));

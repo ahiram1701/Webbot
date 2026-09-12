@@ -10,6 +10,7 @@ import {
   type AgentFrame,
   type Command,
   type Frame,
+  type LlmStatus,
 } from "@webbot/shared";
 
 import { log } from "./config.js";
@@ -62,6 +63,8 @@ export class Bridge {
   /** Quien atiende lo que la extension inicia por su cuenta (el panel del agente). */
   private agentHandler: ((frame: AgentFrame) => void) | null = null;
   private disconnectHandler: (() => void) | null = null;
+  /** Lo que se le cuenta al panel en el welcome: si detras hay modelo o no. */
+  private llmStatus: LlmStatus | null = null;
 
   constructor(private readonly options: BridgeOptions) {
     this.tokenBuffer = Buffer.from(options.token, "utf8");
@@ -99,6 +102,14 @@ export class Bridge {
   /** Avisa de que la extension se fue, para abortar lo que estuviera en marcha. */
   onExtensionGone(handler: () => void): void {
     this.disconnectHandler = handler;
+  }
+
+  /**
+   * Que anunciar en el welcome sobre el modelo. Lo pone attachAgent, que es quien sabe si hubo
+   * proveedor; el puente solo lo repite, porque no tiene por que saber nada de modelos.
+   */
+  describeLlm(status: LlmStatus): void {
+    this.llmStatus = status;
   }
 
   /** Empuja una trama a la extension sin esperar respuesta (eventos del agente). */
@@ -186,7 +197,9 @@ export class Bridge {
         authenticated = true;
         clearTimeout(authTimer);
         this.adoptClient(socket);
-        socket.send(JSON.stringify({ kind: "welcome", version: PROTOCOL_VERSION } satisfies Frame));
+        socket.send(
+          JSON.stringify({ kind: "welcome", version: PROTOCOL_VERSION, llm: this.llmStatus ?? undefined } satisfies Frame),
+        );
         log(`extension conectada (${frame.agent ?? "sin agent"})`);
         return;
       }

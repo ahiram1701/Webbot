@@ -85,6 +85,17 @@
 
       /* La pagina que la persona tiene delante. El panel vive pegado a ella, asi que conviene
          decir de cual estamos hablando antes de que escriba nada. */
+      /* Solo aparece cuando algo impide trabajar (hoy: no hay modelo en el servidor). Lleva la frase
+         entera con lo que hay que arreglar, porque en la cabecera no cabe y es justo lo accionable. */
+      #warn {
+        color: var(--warn);
+        margin: 6px 0 0;
+        font-size: 11px;
+      }
+      #warn[hidden] {
+        display: none;
+      }
+
       #tab {
         color: var(--muted);
         margin: 4px 0 0;
@@ -353,6 +364,7 @@
         <button id="options">Opciones</button>
       </h1>
       <p id="detail"></p>
+      <p id="warn" hidden></p>
       <p id="tab" hidden><span id="tab-host"></span><span id="tab-title"></span></p>
     </header>
 

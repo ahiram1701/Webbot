@@ -1,4 +1,4 @@
-import { FrameSchema, PROTOCOL_VERSION, type Frame } from "@webbot/shared";
+import { FrameSchema, PROTOCOL_VERSION, type Frame, type LlmStatus } from "@webbot/shared";
 
 import { agentConnectionLost, handleAgentEvent, registerPanel } from "./agent.js";
 import { runCommand } from "./commands/index.js";
@@ -22,8 +22,9 @@ let socket: WebSocket | null = null;
 let reconnectDelayMs = RECONNECT_MIN_MS;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-async function setConnected(connected: boolean, detail = ""): Promise<void> {
-  await chrome.storage.session.set({ connected, connectionDetail: detail, connectionAt: Date.now() });
+/** `llm` solo lo trae el welcome; al desconectar se borra, porque deja de haber nada que describir. */
+async function setConnected(connected: boolean, detail = "", llm: LlmStatus | null = null): Promise<void> {
+  await chrome.storage.session.set({ connected, connectionDetail: detail, connectionAt: Date.now(), llm });
   await chrome.action.setBadgeText({ text: connected ? "ON" : "" });
   await chrome.action.setBadgeBackgroundColor({ color: connected ? "#16a34a" : "#dc2626" });
 }
@@ -115,7 +116,7 @@ async function openSocket(): Promise<void> {
     switch (frame.kind) {
       case "welcome":
         reconnectDelayMs = RECONNECT_MIN_MS;
-        void setConnected(true, `Conectado al puente en ${url}.`);
+        void setConnected(true, `Conectado al puente en ${url}.`, frame.llm ?? null);
         return;
       case "request":
         void handleRequest(frame, ws);

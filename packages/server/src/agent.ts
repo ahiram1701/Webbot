@@ -11,7 +11,14 @@ import {
 } from "@webbot/shared";
 
 import { BridgeError } from "./bridge.js";
-import { LlmError, type LlmConversation, type LlmInput, type LlmProvider, type LlmToolResult } from "./llm/index.js";
+import {
+  LlmError,
+  NO_LLM_MESSAGE,
+  type LlmConversation,
+  type LlmInput,
+  type LlmProvider,
+  type LlmToolResult,
+} from "./llm/index.js";
 import { webbotInstructions, WEBBOT_TOOLS, WEBBOT_TOOLS_BY_NAME } from "./tools.js";
 
 /** Lo que el runner necesita del puente. Un interfaz asi de estrecho hace trivial falsearlo. */
@@ -239,9 +246,7 @@ export function createAgentRunner(
     if (!provider) {
       emit(runId, {
         type: "error",
-        message:
-          providerError?.message ??
-          "El servidor no tiene modelo configurado: pon WEBBOT_LLM_PROVIDER, WEBBOT_LLM_MODEL y WEBBOT_LLM_API_KEY en su .env y reinicialo.",
+        message: providerError?.message ?? NO_LLM_MESSAGE,
         code: providerError?.code ?? ErrorCodes.LLM_NOT_CONFIGURED,
       });
       return;

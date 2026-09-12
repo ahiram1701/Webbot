@@ -119,7 +119,12 @@ WEBBOT_LLM_MODEL=qwen3
 ```
 
 Si no hay modelo configurado, el servidor arranca igual y el camino MCP sigue entero: lo único que
-pasa es que el panel te lo dice al primer mensaje.
+pasa es que el panel te lo dice nada más conectar.
+
+La cabecera del panel es el diagnóstico: dice si el puente está conectado, en qué puerto, cuántos
+dominios permite y **con qué modelo**, que el servidor anuncia al conectar. Si no hay ninguno
+configurado lo pone en ámbar con la línea del `.env` que falta, en vez de dejar que lo descubras
+mandando un mensaje y viéndolo fallar.
 
 ### Qué te va a preguntar
 

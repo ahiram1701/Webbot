@@ -1,4 +1,4 @@
-import type { PanelContext } from "@webbot/shared";
+import type { LlmStatus, PanelContext } from "@webbot/shared";
 
 import { activeTab } from "../background/activeTab.js";
 import { PANEL_PORT, type PanelMessage, type PanelUpdate } from "../background/agent.js";
@@ -19,6 +19,8 @@ let transcript: TranscriptEntry[] = [];
 let running = false;
 /** La pagina que el panel tiene al lado; null si no es una pagina sobre la que se pueda actuar. */
 let tab: PanelContext | null = null;
+/** Lo que el servidor dijo de si mismo al conectar; null mientras no haya conexion. */
+let llm: LlmStatus | null = null;
 /** Ultima senal de vida del agente, para poder decir cuanto lleva callado. */
 let lastSignAt = Date.now();
 let activityTimer: ReturnType<typeof setInterval> | null = null;
@@ -28,18 +30,33 @@ const post = (message: PanelMessage): void => port.postMessage(message);
 
 // --- Estado de la conexion -------------------------------------------------
 
+/**
+ * Todo lo que hace falta saber antes de escribir nada: si el servidor esta, con que modelo, y si
+ * falta algo, que. El modelo lo anuncia el servidor en el welcome; sin esto, que no haya ninguno
+ * configurado solo se descubria mandando un mensaje y viendolo fallar.
+ */
 async function renderStatus(): Promise<void> {
   const [settings, session] = await Promise.all([
     getSettings(),
-    chrome.storage.session.get({ connected: false, connectionDetail: "" }),
+    chrome.storage.session.get({ connected: false, connectionDetail: "", llm: null }),
   ]);
   const connected = Boolean(session.connected);
+  llm = session.llm as LlmStatus | null;
+
   $("dot").classList.toggle("on", connected);
   $("state").textContent = connected ? "Conectado" : "Desconectado";
+
   const allow = settings.allowlist.includes("*") ? "todos los dominios" : `${settings.allowlist.length} dominio(s)`;
+  // Un servidor viejo no manda `llm`: mejor no decir nada que inventarse que no hay modelo.
+  const modelo = llm === null ? "" : llm.ready ? ` - ${llm.model ?? "modelo sin nombre"}` : " - sin modelo";
   $("detail").textContent = connected
-    ? `127.0.0.1:${settings.bridgePort} - ${allow}`
+    ? `127.0.0.1:${settings.bridgePort} - ${allow}${modelo}`
     : String(session.connectionDetail ?? "");
+
+  const problema = connected && llm !== null && !llm.ready ? (llm.reason ?? "") : "";
+  $("warn").hidden = problema === "";
+  $("warn").textContent = problema;
+  refreshQuick();
 }
 
 chrome.storage.onChanged.addListener((_changes, area) => {
@@ -77,14 +94,19 @@ async function renderTab(): Promise<void> {
   refreshQuick();
 }
 
-/** Un atajo que solo puede acabar en domain_blocked es peor que no ofrecerlo. */
+/** Un atajo que solo puede acabar en error es peor que no ofrecerlo; el title dice por que. */
 function refreshQuick(): void {
   const box = $("quick");
   box.hidden = running || tab === null;
-  const blocked = tab !== null && !tab.allowed;
+  const motivo =
+    llm !== null && !llm.ready
+      ? "El servidor no tiene modelo configurado."
+      : tab !== null && !tab.allowed
+        ? `${hostOf(tab.url)} no esta en la allowlist: anadelo en Opciones.`
+        : "";
   for (const chip of box.querySelectorAll("button")) {
-    chip.disabled = blocked;
-    chip.title = blocked ? `${hostOf(tab?.url ?? "")} no esta en la allowlist: anadelo en Opciones.` : "";
+    chip.disabled = motivo !== "";
+    chip.title = motivo;
   }
 }
 

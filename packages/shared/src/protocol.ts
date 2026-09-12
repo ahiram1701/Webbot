@@ -152,7 +152,15 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("reasoning"), delta: z.string() }),
   z.object({ type: z.literal("text"), delta: z.string() }),
   z.object({ type: z.literal("tool"), callId: z.string(), name: z.string(), input: z.unknown() }),
-  z.object({ type: z.literal("toolResult"), callId: z.string(), name: z.string(), ok: z.boolean(), summary: z.string() }),
+  /** `code` deja al panel reaccionar al tipo de fallo sin tener que leer el texto del resumen. */
+  z.object({
+    type: z.literal("toolResult"),
+    callId: z.string(),
+    name: z.string(),
+    ok: z.boolean(),
+    summary: z.string(),
+    code: z.string().optional(),
+  }),
   /** Publicacion de verdad: el bucle se para aqui hasta que llegue un agent.confirm. */
   z.object({
     type: z.literal("confirm"),

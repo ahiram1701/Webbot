@@ -121,6 +121,25 @@
         color: var(--warn);
       }
 
+      /* Permitir un dominio ensancha lo que un agente puede tocar en tu navegador, asi que el boton
+         lleva el nombre del dominio y el color de aviso: se ve lo que se esta autorizando. */
+      button.allow {
+        font: inherit;
+        font-size: 11px;
+        color: var(--warn);
+        background: transparent;
+        border: 1px solid var(--warn);
+        border-radius: 5px;
+        padding: 1px 7px;
+        cursor: pointer;
+        flex: none;
+      }
+      button.allow:hover {
+        background: var(--soft);
+      }
+      details.tool button.allow {
+        margin-top: 4px;
+      }
       /* Lo que se pide siempre, a un clic: sin esto la primera impresion del panel es un cuadro de
          texto vacio y ninguna pista de que sabe hacer. */
       #quick {
@@ -425,7 +444,7 @@
       </h1>
       <p id="detail"></p>
       <p id="warn" hidden></p>
-      <p id="tab" hidden><span id="tab-host"></span><span id="tab-title"></span></p>
+      <p id="tab" hidden><span id="tab-host"></span><span id="tab-title"></span><span id="tab-allow"></span></p>
     </header>
 
     <div id="log">

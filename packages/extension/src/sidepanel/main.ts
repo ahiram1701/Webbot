@@ -1,4 +1,4 @@
-import type { LlmStatus, PanelContext } from "@webbot/shared";
+import { ErrorCodes, type LlmStatus, type PanelContext } from "@webbot/shared";
 
 import { activeTab } from "../background/activeTab.js";
 import { PANEL_PORT, type PanelMessage, type PanelUpdate } from "../background/agent.js";
@@ -8,6 +8,7 @@ import {
   clearLog,
   getLog,
   getSettings,
+  saveSettings,
   type ActionLogEntry,
 } from "../background/settings.js";
 import { applyEvent, answerConfirm, type TranscriptEntry } from "../background/transcript.js";
@@ -94,6 +95,31 @@ function hostOf(url: string): string {
 }
 
 /**
+ * Anade un dominio a la allowlist desde el panel. Antes habia que abrir Opciones y escribirlo a
+ * mano en un textarea, que es mucho pedir para desbloquear la pagina que ya tienes delante.
+ *
+ * Se guarda el hostname exacto, no el dominio padre: permitir "gist.github.com" no tiene por que
+ * permitir todo github.com. Ensanchar la regla sigue siendo cosa de Opciones.
+ */
+async function allowDomain(host: string): Promise<void> {
+  const { allowlist } = await getSettings();
+  if (allowlist.includes(host)) return;
+  await saveSettings({ allowlist: [...allowlist, host] });
+  // Guardar dispara storage.onChanged, que repinta el estado y la fila de la pestana.
+}
+
+/** Boton que nombra el dominio que va a permitir: lo que se autoriza tiene que estar a la vista. */
+function allowButton(host: string, label: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "allow";
+  button.textContent = label;
+  button.title = `Anade ${host} a la allowlist: el agente podra leer y actuar ahi.`;
+  button.addEventListener("click", () => void allowDomain(host));
+  return button;
+}
+
+/**
  * Va aparte de render() a proposito. render() rehace el log entero con replaceChildren, asi que
  * repintarlo en cada cambio de pestana cerraria los <details> abiertos y perderia el scroll.
  */
@@ -106,6 +132,8 @@ async function renderTab(): Promise<void> {
     row.title = tab.url;
     $("tab-host").textContent = hostOf(tab.url);
     $("tab-title").textContent = tab.allowed ? tab.title : "fuera de la allowlist";
+    $("tab-allow").replaceChildren();
+    if (!tab.allowed) $("tab-allow").append(allowButton(hostOf(tab.url), "Permitir"));
   }
   refreshQuick();
 }
@@ -201,6 +229,23 @@ function renderActions(): void {
 
 // --- Pintado de la conversacion -------------------------------------------
 
+/**
+ * El dominio que bloqueo este paso, cuando se puede saber con certeza. Solo se mira la url que
+ * llevaba la llamada: adivinarlo del texto del error seria inventar, y un boton que autoriza el
+ * dominio equivocado es peor que no ofrecerlo. Los comandos que van por tabId no lo dicen, y ahi
+ * queda la fila de la pestana.
+ */
+function blockedHost(entry: TranscriptEntry & { kind: "tool" }): string | null {
+  if (entry.ok !== false || entry.code !== ErrorCodes.DOMAIN_BLOCKED) return null;
+  const url = (entry.input as { url?: unknown } | null)?.url;
+  if (typeof url !== "string") return null;
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
 function toolLine(entry: TranscriptEntry & { kind: "tool" }): HTMLElement {
   const box = document.createElement("details");
   box.className = "tool";
@@ -217,6 +262,14 @@ function toolLine(entry: TranscriptEntry & { kind: "tool" }): HTMLElement {
   const detail = document.createElement("pre");
   detail.textContent = `${JSON.stringify(entry.input)}\n${entry.summary ?? ""}`.trim();
   box.append(detail);
+
+  // Fallo por allowlist y sabemos cual: se arregla aqui en vez de mandar a Opciones a escribirlo.
+  const bloqueado = blockedHost(entry);
+  if (bloqueado) {
+    box.append(allowButton(bloqueado, `Permitir ${bloqueado}`));
+    box.open = true;
+  }
+
   return box;
 }
 

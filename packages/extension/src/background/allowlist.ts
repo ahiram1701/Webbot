@@ -48,8 +48,8 @@ export function assertAllowed(url: string, allowlist: string[]): void {
     // Se deja la url tal cual en el mensaje.
   }
   throw new WebbotError(
-    `El dominio '${host}' no esta en la allowlist de Webbot. Anadelo en la pagina de Opciones de la ` +
-      `extension si quieres que el agente pueda actuar ahi.`,
+    `El dominio '${host}' no esta en la allowlist de Webbot. La persona puede permitirlo con el boton ` +
+      `'Permitir' del panel, o anadirlo a mano en la pagina de Opciones de la extension.`,
     ErrorCodes.DOMAIN_BLOCKED,
   );
 }

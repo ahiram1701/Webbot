@@ -141,6 +141,12 @@ navegador, con la hora, sobre qué actuaron, el motivo cuando fallaron y **quié
 `mcp` o `cli`. Es la única forma de ver qué ha hecho un agente externo mientras no mirabas —lo que
 pides tú ya se lee en la conversación—, y se actualiza solo mientras lo tienes abierto.
 
+Cuando algo cae fuera de la allowlist ya no hay que ir a Opciones a escribirlo: la fila de la
+pestaña trae un botón **Permitir**, y un paso que falló con `domain_blocked` trae otro con el
+dominio en el nombre —**Permitir ejemplo.com**— para que se vea exactamente qué se está autorizando.
+Se añade el hostname exacto, no el dominio padre: permitir `gist.github.com` no permite todo
+`github.com`. Ensanchar la regla o quitar dominios sigue siendo cosa de Opciones.
+
 ## Herramientas MCP
 
 | Herramienta | Qué hace |

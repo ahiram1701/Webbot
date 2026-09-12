@@ -87,6 +87,25 @@ describe("agente del panel", () => {
     expect(events.map((event) => event.type)).toEqual(["tool", "toolResult", "text", "done"]);
   });
 
+  it("manda al panel el codigo del fallo, no solo su texto", async () => {
+    const provider = fakeProvider([
+      turn({
+        stop: "tools",
+        toolCalls: [{ id: "c1", name: "webbot_open_tab", input: { url: "https://bloqueado.example/" } }],
+      }),
+      turn({ text: "Ese dominio no esta permitido.", stop: "end" }),
+    ]);
+    const { bridge, events } = fakeBridge(() =>
+      Promise.reject(new BridgeError("no esta en la allowlist", ErrorCodes.DOMAIN_BLOCKED)),
+    );
+
+    createAgentRunner(bridge, provider).handle({ kind: "agent.start", runId: "r1", prompt: "abre eso" });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    // El panel se apoya en el codigo para ofrecer "Permitir <dominio>"; leerlo del resumen seria adivinar.
+    const result = events.find((event) => event.type === "toolResult");
+    expect(result).toMatchObject({ ok: false, code: ErrorCodes.DOMAIN_BLOCKED });
+  });
   it("identifica como 'panel' lo que pide, para no confundirlo con un agente externo", async () => {
     const provider = fakeProvider([
       turn({ stop: "tools", toolCalls: [{ id: "c1", name: "webbot_list_tabs", input: {} }] }),

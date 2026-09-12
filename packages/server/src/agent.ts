@@ -45,7 +45,7 @@ const SYSTEM = [
   webbotInstructions("panel"),
   "Hablas directamente con la persona que usa este navegador a traves de un panel lateral de la extension, no con otro agente.",
   "Responde en el idioma en el que te escriban, en pocas frases y sin volcar JSON crudo: resume lo que encontraste.",
-  "Cuando una herramienta falle, lee el codigo de error y corrige: element_not_found se arregla mirando la pagina con webbot_outline, domain_blocked lo tiene que resolver la persona anadiendo el dominio en Opciones.",
+  "Cuando una herramienta falle, lee el codigo de error y corrige: element_not_found se arregla mirando la pagina con webbot_outline, domain_blocked lo resuelve la persona con el boton 'Permitir' que sale en el propio paso, asi que dile que dominio hace falta y no lo reintentes hasta que te lo diga.",
   "Cada mensaje puede venir precedido de la pestana que la persona tiene delante: 'esta pagina', 'aqui' o 'lo que estoy viendo' se refieren a ese tabId. Usalo directamente, sin volver a listar pestanas ni abrir una nueva. Si la pestana aparece como NO permitida, dilo y no lo intentes.",
 ].join(" ");
 
@@ -188,7 +188,7 @@ export function createAgentRunner(
       const message = error instanceof Error ? error.message : String(error);
       const code = error instanceof BridgeError ? error.code : undefined;
       const detail = code ? `${code}: ${message}` : message;
-      emit(runId, { type: "toolResult", callId: call.id, name: call.name, ok: false, summary: summarize(detail) });
+      emit(runId, { type: "toolResult", callId: call.id, name: call.name, ok: false, summary: summarize(detail), code });
       return { id: call.id, name: call.name, ok: false, content: detail };
     }
   };

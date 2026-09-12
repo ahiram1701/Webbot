@@ -8,7 +8,7 @@ import type { AgentEvent } from "@webbot/shared";
 export type TranscriptEntry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; reasoning: string }
-  | { kind: "tool"; callId: string; name: string; input: unknown; ok?: boolean; summary?: string }
+  | { kind: "tool"; callId: string; name: string; input: unknown; ok?: boolean; summary?: string; code?: string }
   | {
       kind: "confirm";
       confirmId: string;
@@ -44,7 +44,12 @@ export function applyEvent(transcript: TranscriptEntry[], event: AgentEvent): Tr
       // Se busca por callId y no por posicion: las llamadas en paralelo no vuelven en orden.
       const index = next.findIndex((entry) => entry.kind === "tool" && entry.callId === event.callId);
       if (index < 0) return next;
-      next[index] = { ...(next[index] as TranscriptEntry & { kind: "tool" }), ok: event.ok, summary: event.summary };
+      next[index] = {
+        ...(next[index] as TranscriptEntry & { kind: "tool" }),
+        ok: event.ok,
+        summary: event.summary,
+        code: event.code,
+      };
       return next;
     }
     case "confirm":

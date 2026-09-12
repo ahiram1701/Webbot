@@ -105,7 +105,7 @@ WEBBOT_LLM_BASE_URL=https://openrouter.ai/api/v1
 # NVIDIA NIM (clave nvapi-...). El catalogo retira modelos: si uno devuelve 410,
 # mira cuales quedan en https://integrate.api.nvidia.com/v1/models
 WEBBOT_LLM_BASE_URL=https://integrate.api.nvidia.com/v1
-WEBBOT_LLM_MODEL=moonshotai/kimi-k3
+WEBBOT_LLM_MODEL=nvidia/nemotron-3-super-120b-a12b
 
 # Un modelo local, que además no cuesta nada: no hace falta clave
 WEBBOT_LLM_BASE_URL=http://127.0.0.1:11434/v1

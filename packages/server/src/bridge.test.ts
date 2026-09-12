@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ErrorCodes, PROTOCOL_VERSION, SOCIAL_POST_TIMEOUT_MS, type Frame } from "@webbot/shared";
+import { ErrorCodes, PROTOCOL_VERSION, SOCIAL_POST_TIMEOUT_MS, type Frame, type LlmChoice } from "@webbot/shared";
 
 import { Bridge } from "./bridge.js";
 
@@ -63,7 +63,10 @@ async function connectFakeExtension(
 }
 
 /** Se autentica y devuelve el welcome, que es donde el puente se presenta. */
-async function connectAndReadWelcome(target: Bridge): Promise<Extract<Frame, { kind: "welcome" }>> {
+async function connectAndReadWelcome(
+  target: Bridge,
+  llm?: LlmChoice,
+): Promise<Extract<Frame, { kind: "welcome" }>> {
   const ws = new WebSocket(`ws://127.0.0.1:${target.port}`);
   socket = ws;
   await new Promise<void>((resolve, reject) => {
@@ -76,7 +79,9 @@ async function connectAndReadWelcome(target: Bridge): Promise<Extract<Frame, { k
       if (frame.kind === "welcome") resolve(frame);
     });
   });
-  ws.send(JSON.stringify({ kind: "hello", token: TOKEN, version: PROTOCOL_VERSION, agent: "test" } satisfies Frame));
+  ws.send(
+    JSON.stringify({ kind: "hello", token: TOKEN, version: PROTOCOL_VERSION, agent: "test", llm } satisfies Frame),
+  );
   return welcome;
 }
 /** El puente marca `connected` al procesar el hello, no al abrirse el socket. */
@@ -130,6 +135,36 @@ describe("Bridge", () => {
     await target.send({ type: "browser.listTabs" }, "panel");
 
     expect(recibidos.map((frame) => frame.origin)).toEqual(["mcp", "panel"]);
+  });
+  it("aplica el modelo que elige la extension antes de contestar el welcome", async () => {
+    const target = await startBridge();
+    target.describeLlm({ ready: true, model: "del-env" });
+    const recibidas: Array<LlmChoice | null> = [];
+    target.onLlmChoice((choice) => {
+      recibidas.push(choice);
+      return { ready: true, model: `elegido:${choice?.model ?? "ninguno"}` };
+    });
+
+    const welcome = await connectAndReadWelcome(target, { provider: "anthropic", model: "claude-x" });
+
+    // El welcome ya trae el modelo nuevo: si se aplicara despues, el panel ensenaria primero el
+    // del .env y luego el otro.
+    expect(welcome.llm).toEqual({ ready: true, model: "elegido:claude-x" });
+    expect(recibidas).toEqual([{ provider: "anthropic", model: "claude-x" }]);
+  });
+
+  it("sin eleccion avisa con null, para que el servidor vuelva a lo que diga su .env", async () => {
+    const target = await startBridge();
+    const recibidas: Array<LlmChoice | null> = [];
+    target.onLlmChoice((choice) => {
+      recibidas.push(choice);
+      return { ready: true, model: "del-env" };
+    });
+
+    const welcome = await connectAndReadWelcome(target);
+
+    expect(recibidas).toEqual([null]);
+    expect(welcome.llm).toEqual({ ready: true, model: "del-env" });
   });
   it("anuncia en el welcome el modelo que tiene detras", async () => {
     const target = await startBridge();

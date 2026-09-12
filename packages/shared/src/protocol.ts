@@ -139,6 +139,21 @@ export const LlmStatusSchema = z.object({
 export type LlmStatus = z.infer<typeof LlmStatusSchema>;
 
 /**
+ * Modelo elegido desde Opciones, que gana al del .env del servidor. La CLAVE NO ESTA AQUI a
+ * proposito: vive solo en el .env, porque chrome.storage.local lo lee cualquiera con acceso al
+ * perfil y ademas tendria que viajar por el puente. El servidor empareja la eleccion con la clave
+ * que ya tiene para ese proveedor.
+ */
+export const LlmChoiceSchema = z.object({
+  provider: z.enum(["anthropic", "openai"]),
+  model: z.string().min(1),
+  baseUrl: z.string().optional().describe("Solo para openai: el endpoint compatible."),
+  vision: z.boolean().optional(),
+  thinking: z.boolean().optional(),
+});
+export type LlmChoice = z.infer<typeof LlmChoiceSchema>;
+
+/**
  * Quien pidio el comando. Viaja con cada peticion para que el registro de la extension pueda decir
  * si algo lo hizo un agente externo o tu mismo desde el panel, que es la pregunta que se le hace.
  */
@@ -184,7 +199,19 @@ export type ErrorShape = z.infer<typeof ErrorShapeSchema>;
 
 export const FrameSchema = z.discriminatedUnion("kind", [
   /** extension -> servidor, primer frame tras conectar. */
-  z.object({ kind: z.literal("hello"), token: z.string(), version: z.number().int(), agent: z.string().optional() }),
+  /**
+   * `llm` es como se cambia de modelo desde Opciones: viaja en el hello y no en una trama aparte
+   * porque el servidor tiene que haberlo aplicado antes de contestar con el welcome, que es donde
+   * anuncia con que modelo se quedo. Cambiarlo en Opciones reconecta, y asi no hay que inventar
+   * ni un canal de push ni que pasa con una conversacion a medias con otro modelo detras.
+   */
+  z.object({
+    kind: z.literal("hello"),
+    token: z.string(),
+    version: z.number().int(),
+    agent: z.string().optional(),
+    llm: LlmChoiceSchema.optional(),
+  }),
   /** servidor -> extension, acepta el hello y se presenta. */
   z.object({ kind: z.literal("welcome"), version: z.number().int(), llm: LlmStatusSchema.optional() }),
   /** servidor -> extension. */

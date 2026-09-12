@@ -119,6 +119,25 @@
         padding: 1px 4px;
         border-radius: 4px;
       }
+      select {
+        width: 100%;
+        font: inherit;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      label.check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 400;
+      }
+      label.check input {
+        width: auto;
+        margin: 0;
+      }
     </style>
   </head>
   <body>
@@ -139,6 +158,44 @@
       <p class="hint">Igual que <code>WEBBOT_BRIDGE_PORT</code>. Por defecto 8790.</p>
     </fieldset>
 
+    <fieldset>
+      <legend>Modelo del panel</legend>
+      <label for="provider">Proveedor</label>
+      <select id="provider">
+        <option value="">Lo que diga el .env del servidor</option>
+        <option value="anthropic">anthropic</option>
+        <option value="openai">openai (formato /chat/completions)</option>
+      </select>
+      <p class="hint">
+        Solo afecta al panel lateral; un agente externo por MCP trae su propio modelo. Cambiarlo
+        reconecta y <strong>empieza la conversacion de cero</strong>: el historial que guarda el
+        modelo anterior esta en su formato y no es portable.
+      </p>
+
+      <label for="model">Modelo</label>
+      <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="claude-opus-5" />
+      <p class="hint">Tiene que soportar tool calling o el agente no podra hacer nada.</p>
+
+      <label for="baseUrl">URL base (solo openai)</label>
+      <input id="baseUrl" type="text" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1" />
+      <p class="hint">
+        Para OpenRouter, Groq, NVIDIA NIM, Ollama... El formato <code>/chat/completions</code> lo
+        hablan casi todos.
+      </p>
+
+      <label class="check"><input id="vision" type="checkbox" /> Mandarle las capturas de pantalla</label>
+      <p class="hint">
+        Solo con un modelo que vea imagenes. La mayoria de los que se enchufan por
+        <code>/chat/completions</code> son de solo texto y devuelven un error al recibir una.
+      </p>
+
+      <p class="hint warn">
+        La clave de API se sigue configurando en el <code>.env</code> del servidor
+        (<code>WEBBOT_LLM_API_KEY</code>, o <code>ANTHROPIC_API_KEY</code> /
+        <code>OPENAI_API_KEY</code> segun el proveedor). No se guarda aqui a proposito: el
+        almacenamiento de la extension lo lee cualquiera con acceso a este perfil de Chrome.
+      </p>
+    </fieldset>
     <fieldset>
       <legend>Dominios permitidos</legend>
       <label for="allowlist">Un dominio por linea</label>

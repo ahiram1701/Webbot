@@ -1,4 +1,4 @@
-import { DEFAULT_BRIDGE_PORT, type Flow, type RequestOrigin } from "@webbot/shared";
+import { DEFAULT_BRIDGE_PORT, type Flow, type LlmChoice, type RequestOrigin } from "@webbot/shared";
 
 export interface WebbotSettings {
   /** Debe coincidir con WEBBOT_TOKEN del servidor. Sin el, el puente rechaza la conexion. */
@@ -10,6 +10,11 @@ export interface WebbotSettings {
    */
   allowlist: string[];
   flows: Record<string, Flow>;
+  /**
+   * Modelo elegido aqui, que gana al del .env del servidor. null = manda el .env. Nunca lleva la
+   * clave de API: esa se queda en el servidor, no en el almacenamiento del navegador.
+   */
+  llm: LlmChoice | null;
 }
 
 export const DEFAULT_SETTINGS: WebbotSettings = {
@@ -18,6 +23,7 @@ export const DEFAULT_SETTINGS: WebbotSettings = {
   // Arranca con lo justo para el caso de uso pedido; el resto se anade desde Opciones.
   allowlist: ["x.com", "twitter.com", "facebook.com", "wikipedia.org", "github.com", "news.ycombinator.com", "example.com"],
   flows: {},
+  llm: null,
 };
 
 export async function getSettings(): Promise<WebbotSettings> {
@@ -28,6 +34,7 @@ export async function getSettings(): Promise<WebbotSettings> {
     bridgePort: typeof stored.bridgePort === "number" ? stored.bridgePort : DEFAULT_BRIDGE_PORT,
     allowlist: Array.isArray(stored.allowlist) ? (stored.allowlist as string[]) : DEFAULT_SETTINGS.allowlist,
     flows: (stored.flows as Record<string, Flow>) ?? {},
+    llm: (stored.llm as LlmChoice | null) ?? null,
   };
 }
 

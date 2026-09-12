@@ -1,4 +1,4 @@
-import { FlowSchema, type Flow } from "@webbot/shared";
+import { FlowSchema, type Flow, type LlmChoice } from "@webbot/shared";
 
 import { DEFAULT_SETTINGS, getSettings, saveSettings } from "../background/settings.js";
 
@@ -12,6 +12,10 @@ const tokenInput = $<HTMLInputElement>("token");
 const portInput = $<HTMLInputElement>("port");
 const allowlistInput = $<HTMLTextAreaElement>("allowlist");
 const flowsInput = $<HTMLTextAreaElement>("flows");
+const providerInput = $<HTMLSelectElement>("provider");
+const modelInput = $<HTMLInputElement>("model");
+const baseUrlInput = $<HTMLInputElement>("baseUrl");
+const visionInput = $<HTMLInputElement>("vision");
 const status = $("status");
 
 function say(message: string, isError = false): void {
@@ -26,6 +30,26 @@ async function load(): Promise<void> {
   portInput.value = String(settings.bridgePort);
   allowlistInput.value = settings.allowlist.join("\n");
   flowsInput.value = JSON.stringify(settings.flows, null, 2);
+  providerInput.value = settings.llm?.provider ?? "";
+  modelInput.value = settings.llm?.model ?? "";
+  baseUrlInput.value = settings.llm?.baseUrl ?? "";
+  visionInput.checked = settings.llm?.vision ?? false;
+}
+
+/**
+ * Sin proveedor o sin modelo se devuelve null, que significa 'manda el .env del servidor'. Es
+ * mejor eso que guardar media eleccion y dejar al panel sin modelo sin haberlo pedido.
+ */
+function parseChoice(): LlmChoice | null {
+  const provider = providerInput.value.trim();
+  const model = modelInput.value.trim();
+  if (!provider || !model) return null;
+  if (provider !== "anthropic" && provider !== "openai") throw new Error(`Proveedor desconocido: ${provider}.`);
+  const baseUrl = baseUrlInput.value.trim();
+  if (provider === "anthropic" && baseUrl) {
+    throw new Error("La URL base solo se usa con el proveedor openai; con anthropic dejala vacia.");
+  }
+  return { provider, model, ...(baseUrl ? { baseUrl } : {}), vision: visionInput.checked };
 }
 
 /** Valida los flujos uno a uno para poder decir cual falla, no solo que "el JSON esta mal". */
@@ -68,12 +92,20 @@ $("save").addEventListener("click", async () => {
     return;
   }
 
+  let llm: LlmChoice | null;
+  try {
+    llm = parseChoice();
+  } catch (error) {
+    say(error instanceof Error ? error.message : String(error), true);
+    return;
+  }
+
   const allowlist = allowlistInput.value
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
 
-  await saveSettings({ token: tokenInput.value.trim(), bridgePort: port, allowlist, flows });
+  await saveSettings({ token: tokenInput.value.trim(), bridgePort: port, allowlist, flows, llm });
   say("Guardado. La extension reconecta sola con los valores nuevos.");
 });
 

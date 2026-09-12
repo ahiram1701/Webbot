@@ -131,7 +131,18 @@ async function openSocket(): Promise<void> {
   socket = ws;
 
   ws.addEventListener("open", () => {
-    send({ kind: "hello", token: settings.token, version: PROTOCOL_VERSION, agent: navigator.userAgent }, ws);
+    // El modelo elegido viaja en el hello: el servidor lo aplica antes de contestar, asi que el
+    // welcome ya trae con que modelo se quedo y la cabecera del panel no parpadea.
+    send(
+      {
+        kind: "hello",
+        token: settings.token,
+        version: PROTOCOL_VERSION,
+        agent: navigator.userAgent,
+        llm: settings.llm ?? undefined,
+      },
+      ws,
+    );
   });
 
   ws.addEventListener("message", (event: MessageEvent<string>) => {
@@ -224,10 +235,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   else void connect();
 });
 
-// Cambiar el token o el puerto debe reconectar sin tener que recargar la extension.
+// Cambiar el token, el puerto o el modelo debe aplicarse sin recargar la extension. El modelo
+// reconecta como los demas porque viaja en el hello, y de paso deja el servidor sin
+// conversaciones a medias guardadas en el formato nativo del adaptador anterior.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (!("token" in changes) && !("bridgePort" in changes)) return;
+  if (!("token" in changes) && !("bridgePort" in changes) && !("llm" in changes)) return;
   reconnectDelayMs = RECONNECT_MIN_MS;
   socket?.close();
   socket = null;

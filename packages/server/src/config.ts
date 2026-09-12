@@ -43,16 +43,28 @@ function requiredToken(): string {
  * camino MCP no necesita modelo, asi que sin estas variables el servidor arranca igual y lo unico
  * que se queda sin agente es el panel, que lo dice con un mensaje en vez de fallar al arrancar.
  */
+/**
+ * La clave del modelo vive SOLO aqui, en el entorno del servidor. Opciones puede elegir proveedor
+ * y modelo, pero nunca manda una clave: se empareja con la que ya haya para ese proveedor.
+ */
+export function apiKeyFor(provider: "anthropic" | "openai"): string {
+  return (
+    process.env.WEBBOT_LLM_API_KEY?.trim() ||
+    (provider === "anthropic" ? process.env.ANTHROPIC_API_KEY?.trim() : process.env.OPENAI_API_KEY?.trim()) ||
+    ""
+  );
+}
+
+/** Techo por turno, comun a cualquier modelo: no cambia porque se elija otro desde Opciones. */
+export const llmTimeoutMs = intFromEnv("WEBBOT_LLM_TIMEOUT_MS", 180_000);
+
 function llmConfig(): LlmConfig | null {
   const provider = process.env.WEBBOT_LLM_PROVIDER?.trim().toLowerCase() || "anthropic";
   if (provider !== "anthropic" && provider !== "openai") {
     log(`WEBBOT_LLM_PROVIDER='${provider}' no existe: usa 'anthropic' u 'openai'. El panel se queda sin agente.`);
     return null;
   }
-  const apiKey =
-    process.env.WEBBOT_LLM_API_KEY?.trim() ||
-    (provider === "anthropic" ? process.env.ANTHROPIC_API_KEY?.trim() : process.env.OPENAI_API_KEY?.trim()) ||
-    "";
+  const apiKey = apiKeyFor(provider);
   const baseUrl = process.env.WEBBOT_LLM_BASE_URL?.trim() || "https://api.openai.com/v1";
   const model = process.env.WEBBOT_LLM_MODEL?.trim() || (provider === "anthropic" ? "claude-opus-5" : "");
 
@@ -69,7 +81,7 @@ function llmConfig(): LlmConfig | null {
     // Apagada por defecto: la mayoria de modelos que se enchufan aqui son de solo texto y una
     // imagen les devuelve un 400. Quien tenga uno con vision la enciende a mano.
     vision: ["on", "true", "1"].includes(process.env.WEBBOT_LLM_VISION?.trim().toLowerCase() || "off"),
-    timeoutMs: intFromEnv("WEBBOT_LLM_TIMEOUT_MS", 180_000),
+    timeoutMs: llmTimeoutMs,
   };
 }
 

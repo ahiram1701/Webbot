@@ -79,6 +79,12 @@ export interface AgentRunner {
   handle(frame: AgentFrame): void;
   /** La extension se fue: lo que estuviera en marcha ya no le importa a nadie. */
   stopAll(): void;
+  /**
+   * Cambia el modelo de detras. Solo se llama al autenticarse una conexion nueva, cuando la
+   * anterior ya disparo stopAll: cambiar de adaptador con una conversacion viva dejaria el
+   * historial en un formato nativo que el nuevo no sabe leer.
+   */
+  use(next: LlmProvider | null, error: LlmError | null): void;
 }
 
 function summarize(value: string): string {
@@ -128,6 +134,9 @@ export function createAgentRunner(
   turnTimeoutMs: number = DEFAULT_TURN_TIMEOUT_MS,
 ): AgentRunner {
   const runs = new Map<string, Run>();
+  // Mutables porque Opciones puede elegir otro modelo: la referencia cambia, el bucle no.
+  let current = provider;
+  let currentError = providerError;
 
   const tools = WEBBOT_TOOLS.map((entry) => ({
     name: entry.name,
@@ -203,7 +212,7 @@ export function createAgentRunner(
 
     try {
       const result = await bridge.send(command, "panel");
-      const { content, image } = serializeResult(command, result, provider?.vision ?? false);
+      const { content, image } = serializeResult(command, result, current?.vision ?? false);
       emit(runId, { type: "toolResult", callId: call.id, name: call.name, ok: true, summary: summarize(content) });
       return { id: call.id, name: call.name, ok: true, content, image };
     } catch (error) {
@@ -266,14 +275,15 @@ export function createAgentRunner(
   };
 
   const start = (runId: string, prompt: string, context?: PanelContext): void => {
-    if (!provider) {
+    if (!current) {
       emit(runId, {
         type: "error",
-        message: providerError?.message ?? NO_LLM_MESSAGE,
-        code: providerError?.code ?? ErrorCodes.LLM_NOT_CONFIGURED,
+        message: currentError?.message ?? NO_LLM_MESSAGE,
+        code: currentError?.code ?? ErrorCodes.LLM_NOT_CONFIGURED,
       });
       return;
     }
+    const activo = current;
 
     const existing = runs.get(runId);
     if (existing?.busy) {
@@ -283,7 +293,7 @@ export function createAgentRunner(
 
     // El mismo runId continua la conversacion: el panel solo manda texto y el historial vive aqui.
     const run: Run = existing ?? {
-      conversation: provider.start(systemPrompt(provider.vision), tools),
+      conversation: activo.start(systemPrompt(activo.vision), tools),
       controller: new AbortController(),
       busy: false,
       cancelled: false,
@@ -338,6 +348,12 @@ export function createAgentRunner(
     },
     stopAll(): void {
       for (const runId of [...runs.keys()]) cancel(runId);
+      runs.clear();
+    },
+    use(next: LlmProvider | null, error: LlmError | null): void {
+      current = next;
+      currentError = error;
+      // Las conversaciones vivas las guarda el adaptador viejo en su formato: no son portables.
       runs.clear();
     },
   };

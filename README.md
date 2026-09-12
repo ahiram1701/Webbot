@@ -150,6 +150,22 @@ distribución de la página —qué tapa qué, dónde está algo— y no para le
 mejor y más barato por `webbot_extract`. Ojo con una cosa: la captura **trae la pestaña al primer
 plano**, porque `captureVisibleTab` solo fotografía la pestaña activa.
 
+### Cambiarlo sin tocar el `.env`
+
+La página de **Opciones** de la extensión elige proveedor, modelo, URL base y visión para el panel.
+Lo que se ponga ahí gana al `.env`; dejarlo vacío devuelve el mando al `.env`. Es la forma barata de
+comparar modelos en la misma tarea, que es justo lo que hay que hacer cuando el agente parece torpe.
+
+**La clave de API no se configura ahí, a propósito.** Sigue viviendo solo en el `.env` del servidor,
+que la empareja con el proveedor elegido (`WEBBOT_LLM_API_KEY`, o `ANTHROPIC_API_KEY` /
+`OPENAI_API_KEY`). El almacenamiento de una extensión lo lee cualquiera con acceso a ese perfil de
+Chrome, y además tendría que viajar por el puente.
+
+La elección viaja en el `hello`, no en una trama aparte, porque el servidor tiene que haberla
+aplicado **antes** de contestar el `welcome`, que es donde anuncia con qué modelo se quedó. Cambiarla
+reconecta, y eso también resuelve lo que hacer con una conversación a medias: el historial lo guarda
+cada adaptador en su formato nativo y no es portable, así que **cambiar de modelo empieza de cero**.
+
 ### Qué te va a preguntar
 
 Solo una cosa: **publicar de verdad**. El agente hace `dryRun` libremente, pero antes de pulsar

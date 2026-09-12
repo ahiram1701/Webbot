@@ -10,6 +10,7 @@ import {
   type AgentFrame,
   type Command,
   type Frame,
+  type LlmChoice,
   type LlmStatus,
   type RequestOrigin,
 } from "@webbot/shared";
@@ -66,6 +67,8 @@ export class Bridge {
   private disconnectHandler: (() => void) | null = null;
   /** Lo que se le cuenta al panel en el welcome: si detras hay modelo o no. */
   private llmStatus: LlmStatus | null = null;
+  /** Quien sabe montar el modelo que pide la extension. Lo pone attachAgent. */
+  private llmChooser: ((choice: LlmChoice | null) => LlmStatus) | null = null;
 
   constructor(private readonly options: BridgeOptions) {
     this.tokenBuffer = Buffer.from(options.token, "utf8");
@@ -111,6 +114,15 @@ export class Bridge {
    */
   describeLlm(status: LlmStatus): void {
     this.llmStatus = status;
+  }
+
+  /**
+   * Quien atiende la eleccion de modelo que trae el hello. Se aplica ANTES de contestar, porque
+   * el welcome es donde se anuncia con que modelo se quedo: si se aplicara despues, el panel
+   * ensenaria un momento el del .env y luego el otro.
+   */
+  onLlmChoice(chooser: (choice: LlmChoice | null) => LlmStatus): void {
+    this.llmChooser = chooser;
   }
 
   /** Empuja una trama a la extension sin esperar respuesta (eventos del agente). */
@@ -202,6 +214,8 @@ export class Bridge {
         authenticated = true;
         clearTimeout(authTimer);
         this.adoptClient(socket);
+        // La extension puede traer su propio modelo elegido en Opciones; gana al del .env.
+        if (this.llmChooser) this.llmStatus = this.llmChooser(frame.llm ?? null);
         socket.send(
           JSON.stringify({ kind: "welcome", version: PROTOCOL_VERSION, llm: this.llmStatus ?? undefined } satisfies Frame),
         );

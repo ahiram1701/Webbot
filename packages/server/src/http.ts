@@ -1,6 +1,7 @@
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 
+import { attachAgent } from "./attach.js";
 import { Bridge } from "./bridge.js";
 import { config, log } from "./config.js";
 import { createWebbotMcpServer } from "./mcpServer.js";
@@ -18,6 +19,7 @@ async function main(): Promise<void> {
     requestTimeoutMs: config.requestTimeoutMs,
   });
   await bridge.start();
+  attachAgent(bridge);
 
   const app = express();
   app.use(express.json({ limit: "8mb" }));

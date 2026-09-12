@@ -5,6 +5,8 @@ import { config as loadEnv } from "dotenv";
 
 import { DEFAULT_BRIDGE_PORT, DEFAULT_HTTP_PORT } from "@webbot/shared";
 
+import type { LlmConfig } from "./llm/index.js";
+
 /**
  * Los scripts de npm workspaces corren con cwd en packages/server, asi que el .env de la raiz del
  * repo queda fuera del alcance por defecto de dotenv. Se prueban los dos: primero el del directorio
@@ -36,10 +38,42 @@ function requiredToken(): string {
   return token;
 }
 
+/**
+ * Configuracion del modelo que mueve el panel de la extension. Todo opcional a proposito: el
+ * camino MCP no necesita modelo, asi que sin estas variables el servidor arranca igual y lo unico
+ * que se queda sin agente es el panel, que lo dice con un mensaje en vez de fallar al arrancar.
+ */
+function llmConfig(): LlmConfig | null {
+  const provider = process.env.WEBBOT_LLM_PROVIDER?.trim().toLowerCase() || "anthropic";
+  if (provider !== "anthropic" && provider !== "openai") {
+    log(`WEBBOT_LLM_PROVIDER='${provider}' no existe: usa 'anthropic' u 'openai'. El panel se queda sin agente.`);
+    return null;
+  }
+  const apiKey =
+    process.env.WEBBOT_LLM_API_KEY?.trim() ||
+    (provider === "anthropic" ? process.env.ANTHROPIC_API_KEY?.trim() : process.env.OPENAI_API_KEY?.trim()) ||
+    "";
+  const baseUrl = process.env.WEBBOT_LLM_BASE_URL?.trim() || "https://api.openai.com/v1";
+  const model = process.env.WEBBOT_LLM_MODEL?.trim() || (provider === "anthropic" ? "claude-opus-5" : "");
+
+  // Un modelo local no pide clave, pero sin modelo no hay nada que llamar.
+  if (!model) return null;
+  if (provider === "anthropic" && !apiKey) return null;
+
+  return {
+    provider,
+    model,
+    apiKey,
+    baseUrl,
+    thinking: (process.env.WEBBOT_LLM_THINKING?.trim().toLowerCase() || "adaptive") !== "off",
+  };
+}
+
 export const config = {
   get token(): string {
     return requiredToken();
   },
+  llm: llmConfig(),
   bridgePort: intFromEnv("WEBBOT_BRIDGE_PORT", DEFAULT_BRIDGE_PORT),
   bridgeHost: process.env.WEBBOT_BRIDGE_HOST?.trim() || "127.0.0.1",
   httpPort: intFromEnv("WEBBOT_HTTP_PORT", DEFAULT_HTTP_PORT),

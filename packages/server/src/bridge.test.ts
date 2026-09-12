@@ -201,4 +201,44 @@ describe("Bridge", () => {
     ws.send(JSON.stringify({ kind: "ping", t: 123 } satisfies Frame));
     await expect(pong).resolves.toMatchObject({ kind: "pong", t: 123 });
   });
+
+  it("entrega al agente lo que inicia la extension y le empuja los eventos de vuelta", async () => {
+    const target = await startBridge();
+    const recibidas: Frame[] = [];
+    target.onExtensionFrame((frame) => recibidas.push(frame));
+
+    const ws = await connectFakeExtension(target);
+    await waitForConnected(target);
+
+    const evento = new Promise<Frame>((resolve) => {
+      ws.on("message", (raw) => {
+        const frame = JSON.parse(raw.toString()) as Frame;
+        if (frame.kind === "agent.event") resolve(frame);
+      });
+    });
+
+    ws.send(JSON.stringify({ kind: "agent.start", runId: "r1", prompt: "abre example.com" } satisfies Frame));
+    for (let i = 0; i < 100 && recibidas.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(recibidas[0]).toMatchObject({ kind: "agent.start", runId: "r1", prompt: "abre example.com" });
+
+    target.sendToExtension({ kind: "agent.event", runId: "r1", event: { type: "done", steps: 2 } });
+    await expect(evento).resolves.toMatchObject({ runId: "r1", event: { type: "done", steps: 2 } });
+  });
+
+  it("avisa cuando la extension se va, para no dejar un run esperando", async () => {
+    const target = await startBridge();
+    let ido = false;
+    target.onExtensionGone(() => {
+      ido = true;
+    });
+
+    const ws = await connectFakeExtension(target);
+    await waitForConnected(target);
+    ws.close();
+    await waitForConnected(target, false);
+
+    expect(ido).toBe(true);
+  });
 });

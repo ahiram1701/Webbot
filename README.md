@@ -1,25 +1,34 @@
 # Webbot
 
-Extensión de Chrome (Manifest V3) controlable por agentes de IA a través de MCP. Extrae texto de
-sitios web, automatiza clics y escritura en páginas, y publica en Facebook y X usando la sesión que
-ya tienes abierta en el navegador.
+Extensión de Chrome (Manifest V3) que extrae texto de sitios web, automatiza clics y escritura en
+páginas, y publica en Facebook y X usando la sesión que ya tienes abierta en el navegador. Se le
+puede pedir en lenguaje natural desde su panel lateral, o conducirla desde un agente externo por MCP.
 
 ## Cómo encaja todo
 
 El service worker de MV3 no puede escuchar en un puerto, así que la conexión va al revés de lo
-habitual: el servidor MCP levanta un WebSocket y **la extensión se conecta a él** como cliente.
+habitual: el servidor levanta un WebSocket y **la extensión se conecta a él** como cliente. Sobre ese
+mismo puente caben los dos modos de uso.
 
 ```
-Agente IA (Claude Code, Claude Desktop, cualquier cliente MCP)
+Agente IA externo (Claude Code, Claude Desktop, cualquier cliente MCP)
       │  MCP: stdio  |  HTTP streamable en /mcp
       ▼
   packages/server ──── puente WebSocket ws://127.0.0.1:8790 (token compartido)
-      ▼
-  packages/extension · service worker (router de comandos)
-      │  chrome.tabs / chrome.scripting
-      ▼
-  runtime inyectado en la página · extraer · clic · escribir · publicar
+      ▲   │                                  ▲
+      │   │ comandos                         │ "abre example.com y dime de qué va"
+      │   ▼                                  │
+      │ packages/extension · service worker (router de comandos)
+      │         │  chrome.tabs / chrome.scripting       │
+      │         ▼                                       ▼
+      │   runtime inyectado · extraer · clic · escribir · publicar
+      │                                          panel lateral (chat)
+      └── bucle agéntico: el servidor llama al modelo y sus herramientas
+          bajan por el mismo puente
 ```
+
+Las herramientas son las mismas por los dos caminos, así que la allowlist, los plazos y el foco de
+pestaña se aplican igual venga la orden de donde venga.
 
 `packages/shared` define el protocolo con zod y lo importan los dos lados: cambiar un comando rompe
 la compilación en ambos extremos, que es justo lo que quieres que pase.
@@ -56,14 +65,64 @@ está la allowlist de dominios: el agente solo puede actuar sobre los que aparez
 npm run mcp
 ```
 
-El popup de la extensión debe pasar a **Conectado** y el icono mostrar el distintivo `ON`.
+El panel de la extensión debe pasar a **Conectado** y el icono mostrar el distintivo `ON`.
 
-**6. Regístralo en tu agente.** Copia `.mcp.json.example` a `.mcp.json` (o pega su contenido en la
-configuración de Claude Desktop) y ajusta `cwd` a la ruta del repo. El token no se repite ahí: el
-servidor lo lee del `.env` de la raíz, y así no acaba en un archivo que se pueda commitear.
+**6. Elige quién le da las órdenes.** Para pedírselo tú desde el panel, configura un modelo en el
+`.env` (ver abajo). Para conducirla desde un agente externo, copia `.mcp.json.example` a `.mcp.json`
+(o pega su contenido en la configuración de Claude Desktop) y ajusta `cwd` a la ruta del repo. El
+token no se repite ahí: el servidor lo lee del `.env` de la raíz, y así no acaba en un archivo que se
+pueda commitear. Los dos modos conviven sin estorbarse.
 
 Durante el desarrollo, `npm run dev` levanta Vite con recarga en caliente; la extensión se recarga
 sola al guardar.
+
+## Pedírselo a la extensión
+
+Pulsa el icono y se abre el panel lateral: escribes lo que quieres y el agente lo hace. El bucle no
+corre en la extensión sino en `packages/server`, que es quien llama al modelo; las herramientas que
+el modelo decide usar bajan por el puente como cualquier otro comando. Por eso el servidor tiene que
+estar arrancado (`npm run mcp`) también para este modo.
+
+Configura el modelo en el `.env` de la raíz:
+
+```bash
+WEBBOT_LLM_PROVIDER=anthropic          # anthropic | openai
+WEBBOT_LLM_MODEL=claude-opus-5
+WEBBOT_LLM_API_KEY=sk-ant-...          # también vale ANTHROPIC_API_KEY
+```
+
+`openai` no significa OpenAI: es el formato `/chat/completions`, que hablan casi todos los demás. Se
+cambia de proveedor cambiando la URL base y el modelo, sin tocar código.
+
+```bash
+# OpenAI
+WEBBOT_LLM_PROVIDER=openai
+WEBBOT_LLM_MODEL=gpt-4.1
+
+# OpenRouter, Groq, DeepSeek, Mistral, la capa compatible de Gemini...
+WEBBOT_LLM_BASE_URL=https://openrouter.ai/api/v1
+
+# NVIDIA NIM (clave nvapi-...)
+WEBBOT_LLM_BASE_URL=https://integrate.api.nvidia.com/v1
+WEBBOT_LLM_MODEL=meta/llama-3.3-70b-instruct
+
+# Un modelo local, que además no cuesta nada: no hace falta clave
+WEBBOT_LLM_BASE_URL=http://127.0.0.1:11434/v1
+WEBBOT_LLM_MODEL=qwen3
+```
+
+Si no hay modelo configurado, el servidor arranca igual y el camino MCP sigue entero: lo único que
+pasa es que el panel te lo dice al primer mensaje.
+
+### Qué te va a preguntar
+
+Solo una cosa: **publicar de verdad**. El agente hace `dryRun` libremente, pero antes de pulsar
+Publicar el panel se para y te enseña la red, la cuenta y el texto con dos botones. Lo demás —abrir
+pestañas, hacer clic, escribir en formularios— lo hace sin preguntar, y el límite real de dónde puede
+tocar sigue siendo la allowlist de Opciones.
+
+El botón **Detener** corta el bucle en seco, y **Nueva** empieza una conversación desde cero. Cerrar
+el panel no cancela nada: el historial vive en el service worker y al reabrirlo está todo.
 
 ## Herramientas MCP
 
@@ -224,7 +283,10 @@ cliente MCP lo lanza como subproceso local y envolverlo en `docker run -i` solo 
 
 | Síntoma | Causa habitual |
 | --- | --- |
-| El popup dice "Desconectado" | El servidor no está arrancado (`npm run mcp`). |
+| El panel dice "Desconectado" | El servidor no está arrancado (`npm run mcp`). |
+| `llm_not_configured` | Falta `WEBBOT_LLM_MODEL` o la clave en el `.env`: el panel no tiene modelo. |
+| `llm_unauthorized` | El proveedor rechazó la clave de `WEBBOT_LLM_API_KEY`. |
+| `agent_max_steps` | El agente dio 30 pasos sin terminar. Pídeselo por partes. |
 | "Token rechazado" | El de Opciones no coincide con `WEBBOT_TOKEN` del `.env`. |
 | `domain_blocked` | Falta el dominio en la allowlist de Opciones. |
 | `element_not_found` | Llama a `webbot_outline` y usa el selector que devuelve. |
@@ -236,4 +298,4 @@ cliente MCP lo lanza como subproceso local y envolverlo en `docker run -i` solo 
 | `tab_hidden` | La pestaña de la red no está visible: tráela al frente y reintenta. |
 | `deadline_exceeded` | El flujo llegó a Publicar fuera de plazo y abortó sin pulsar. No se publicó nada. |
 | `composer_text_mismatch` | El editor no quedó con el texto pedido, así que no se publica. |
-| El worker parece dormido | La alarma de keepalive lo revive en menos de 30 s; el popup fuerza la reconexión. |
+| El worker parece dormido | La alarma de keepalive lo revive en menos de 30 s; el panel fuerza la reconexión. |

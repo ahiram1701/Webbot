@@ -35,7 +35,7 @@ export async function saveSettings(patch: Partial<WebbotSettings>): Promise<void
   await chrome.storage.local.set(patch);
 }
 
-/** Ultimas acciones ejecutadas, para que el popup muestre que esta haciendo el agente. */
+/** Ultimas acciones ejecutadas: dejan rastro de lo que hizo el agente externo por MCP. */
 export interface ActionLogEntry {
   at: number;
   command: string;

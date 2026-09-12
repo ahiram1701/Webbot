@@ -2,7 +2,15 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 
 import { WebSocketServer, type WebSocket } from "ws";
 
-import { ErrorCodes, FrameSchema, PROTOCOL_VERSION, timeoutFor, type Command, type Frame } from "@webbot/shared";
+import {
+  ErrorCodes,
+  FrameSchema,
+  PROTOCOL_VERSION,
+  timeoutFor,
+  type AgentFrame,
+  type Command,
+  type Frame,
+} from "@webbot/shared";
 
 import { log } from "./config.js";
 
@@ -51,6 +59,9 @@ export class Bridge {
   private pingTimer: NodeJS.Timeout | null = null;
   private readonly pending = new Map<string, Pending>();
   private readonly tokenBuffer: Buffer;
+  /** Quien atiende lo que la extension inicia por su cuenta (el panel del agente). */
+  private agentHandler: ((frame: AgentFrame) => void) | null = null;
+  private disconnectHandler: (() => void) | null = null;
 
   constructor(private readonly options: BridgeOptions) {
     this.tokenBuffer = Buffer.from(options.token, "utf8");
@@ -77,6 +88,25 @@ export class Bridge {
     });
   }
 
+  /**
+   * Registra quien atiende las tramas `agent.*`. Sin esto se descartan, que es justo lo que debe
+   * pasar cuando el servidor corre sin modelo configurado.
+   */
+  onExtensionFrame(handler: (frame: AgentFrame) => void): void {
+    this.agentHandler = handler;
+  }
+
+  /** Avisa de que la extension se fue, para abortar lo que estuviera en marcha. */
+  onExtensionGone(handler: () => void): void {
+    this.disconnectHandler = handler;
+  }
+
+  /** Empuja una trama a la extension sin esperar respuesta (eventos del agente). */
+  sendToExtension(frame: Frame): void {
+    const socket = this.client;
+    if (socket && socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
+  }
+
   /** Envia un comando a la extension y espera su respuesta. */
   send(command: Command): Promise<unknown> {
     const socket = this.client;
@@ -84,7 +114,7 @@ export class Bridge {
       return Promise.reject(
         new BridgeError(
           "La extension Webbot no esta conectada. Abre Chrome, comprueba que la extension esta " +
-            "activa y que su popup marca 'conectado' (token y puerto correctos en Opciones).",
+            "activa y que su panel marca 'conectado' (token y puerto correctos en Opciones).",
           ErrorCodes.NOT_CONNECTED,
         ),
       );
@@ -174,6 +204,7 @@ export class Bridge {
       if (this.client === socket) {
         this.client = null;
         this.stopPing();
+        this.disconnectHandler?.();
         log("extension desconectada");
       }
     });
@@ -218,6 +249,11 @@ export class Bridge {
       }
       case "ping":
         socket.send(JSON.stringify({ kind: "pong", t: frame.t } satisfies Frame));
+        return;
+      case "agent.start":
+      case "agent.cancel":
+      case "agent.confirm":
+        this.agentHandler?.(frame);
         return;
       default:
         return;

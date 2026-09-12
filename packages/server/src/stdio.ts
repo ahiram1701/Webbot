@@ -1,5 +1,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
+import { attachAgent } from "./attach.js";
 import { Bridge } from "./bridge.js";
 import { config, log } from "./config.js";
 import { createWebbotMcpServer } from "./mcpServer.js";
@@ -17,6 +18,7 @@ async function main(): Promise<void> {
   });
 
   await bridge.start();
+  attachAgent(bridge);
 
   const server = createWebbotMcpServer(bridge);
   await server.connect(new StdioServerTransport());

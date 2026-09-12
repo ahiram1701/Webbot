@@ -1,5 +1,6 @@
 import { FrameSchema, PROTOCOL_VERSION, type Frame } from "@webbot/shared";
 
+import { agentConnectionLost, handleAgentEvent, registerPanel } from "./agent.js";
 import { runCommand } from "./commands/index.js";
 import { appendLog, getSettings } from "./settings.js";
 
@@ -119,6 +120,9 @@ async function openSocket(): Promise<void> {
       case "request":
         void handleRequest(frame, ws);
         return;
+      case "agent.event":
+        void handleAgentEvent(frame.runId, frame.event);
+        return;
       case "ping":
         send({ kind: "pong", t: frame.t }, ws);
         return;
@@ -141,6 +145,7 @@ async function openSocket(): Promise<void> {
             ? "Otra conexion de Webbot sustituyo a esta. Comprueba que la extension no este cargada dos veces."
             : `Conexion cerrada (codigo ${event.code}).`;
     void setConnected(false, motivo);
+    void agentConnectionLost();
     // Un token o una version incorrectos no se arreglan reintentando en bucle, y si el servidor ya
     // atiende a otra conexion (4409), reconectar solo reabriria la pelea por el puente.
     if (event.code !== 4403 && event.code !== 4400 && event.code !== 4409) scheduleReconnect();
@@ -151,6 +156,22 @@ async function openSocket(): Promise<void> {
     void setConnected(false, `Sin respuesta en ${url}. Arranca el servidor con 'npm run mcp'.`);
   });
 }
+
+// --- Panel lateral --------------------------------------------------------
+
+// El clic en el icono abre el panel; ya no hay popup que abrir.
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {
+  // Chrome < 116 o el panel deshabilitado: el resto de la extension sigue funcionando.
+});
+
+registerPanel((frame) => {
+  if (socket?.readyState !== WebSocket.OPEN) {
+    void connect();
+    return false;
+  }
+  send(frame);
+  return true;
+});
 
 // --- Ciclo de vida --------------------------------------------------------
 
@@ -180,7 +201,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   void connect();
 });
 
-// El popup pregunta el estado al abrirse; responderle tambien despierta al worker.
+// El panel pregunta el estado al abrirse; responderle tambien despierta al worker.
 chrome.runtime.onMessage.addListener((message: { type?: string }, _sender, sendResponse) => {
   if (message?.type !== "webbot:reconnect") return undefined;
   reconnectDelayMs = RECONNECT_MIN_MS;

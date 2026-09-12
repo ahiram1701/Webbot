@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Webbot</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #18181b;
+        --muted: #71717a;
+        --bg: #ffffff;
+        --soft: #f4f4f5;
+        --border: #e4e4e7;
+        --ok: #16a34a;
+        --bad: #dc2626;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #f4f4f5;
+          --muted: #a1a1aa;
+          --bg: #18181b;
+          --soft: #27272a;
+          --border: #3f3f46;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+
+      header {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        flex: none;
+      }
+      h1 {
+        font-size: 13px;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--bad);
+        flex: none;
+      }
+      .dot.on {
+        background: var(--ok);
+      }
+      h1 .grow {
+        flex: 1;
+      }
+      header button {
+        font: inherit;
+        font-size: 11px;
+        color: var(--muted);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 2px 7px;
+        cursor: pointer;
+      }
+      header button:hover {
+        color: var(--fg);
+        border-color: var(--muted);
+      }
+      #detail {
+        color: var(--muted);
+        margin: 6px 0 0;
+        font-size: 11px;
+      }
+
+      #log {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .empty {
+        color: var(--muted);
+        margin: auto;
+        text-align: center;
+        max-width: 240px;
+      }
+      .user {
+        align-self: flex-end;
+        max-width: 85%;
+        background: var(--soft);
+        border-radius: 10px 10px 2px 10px;
+        padding: 6px 10px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .assistant {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .reasoning {
+        color: var(--muted);
+        font-style: italic;
+        white-space: pre-wrap;
+        margin-bottom: 4px;
+      }
+      details.tool {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 11px;
+      }
+      details.tool summary {
+        cursor: pointer;
+        list-style: none;
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+      }
+      details.tool summary::-webkit-details-marker {
+        display: none;
+      }
+      .tool .name {
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        flex: 1;
+        overflow-wrap: anywhere;
+      }
+      .tool pre {
+        margin: 6px 0 2px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .error {
+        color: var(--bad);
+        border-left: 2px solid var(--bad);
+        padding-left: 8px;
+      }
+
+      .confirm {
+        border: 1px solid var(--bad);
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .confirm h2 {
+        font-size: 12px;
+        margin: 0 0 6px;
+      }
+      .confirm dl {
+        margin: 0 0 8px;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2px 8px;
+        font-size: 11px;
+      }
+      .confirm dt {
+        color: var(--muted);
+      }
+      .confirm dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .confirm .quote {
+        background: var(--soft);
+        border-radius: 6px;
+        padding: 6px 8px;
+        margin-bottom: 8px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .confirm .buttons {
+        display: flex;
+        gap: 8px;
+      }
+      .confirm button {
+        flex: 1;
+        font: inherit;
+        padding: 5px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--fg);
+        cursor: pointer;
+      }
+      .confirm button.go {
+        border-color: var(--bad);
+        color: var(--bad);
+        font-weight: 600;
+      }
+      .confirm .answered {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      form {
+        flex: none;
+        border-top: 1px solid var(--border);
+        padding: 10px 12px;
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+      }
+      textarea {
+        flex: 1;
+        resize: none;
+        font: inherit;
+        color: var(--fg);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 8px;
+        min-height: 34px;
+        max-height: 120px;
+      }
+      textarea:focus {
+        outline: none;
+        border-color: var(--muted);
+      }
+      #send {
+        font: inherit;
+        padding: 7px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--fg);
+        cursor: pointer;
+      }
+      #send:hover {
+        border-color: var(--muted);
+      }
+      #send.stop {
+        border-color: var(--bad);
+        color: var(--bad);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>
+        <span class="dot" id="dot"></span><span id="state">Comprobando...</span><span class="grow"></span>
+        <button id="reset" title="Empezar una conversacion nueva">Nueva</button>
+        <button id="reconnect">Reconectar</button>
+        <button id="options">Opciones</button>
+      </h1>
+      <p id="detail"></p>
+    </header>
+
+    <div id="log">
+      <p class="empty">Dile que hacer. Por ejemplo: "abre example.com y dime de que va".</p>
+    </div>
+
+    <form id="composer">
+      <textarea id="prompt" rows="1" placeholder="Que quieres que haga..."></textarea>
+      <button id="send" type="submit">Enviar</button>
+    </form>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

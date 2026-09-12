@@ -5,8 +5,11 @@ import { z } from "zod";
  *
  * v2: social.post exige expectedAccount para publicar y las peticiones llevan su plazo. Se subio
  * para que una extension sin recargar, que ignoraria ambas protecciones, no llegue a conectarse.
+ *
+ * v3: la extension puede iniciar (tramas agent.*). Una extension sin recargar no entenderia los
+ * eventos del agente y el panel se quedaria mudo, asi que mejor que no conecte y lo diga.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const DEFAULT_BRIDGE_PORT = 8790;
 export const DEFAULT_HTTP_PORT = 8791;
 
@@ -105,6 +108,35 @@ export type Command = z.infer<typeof CommandSchema>;
 export type CommandType = Command["type"];
 
 // ---------------------------------------------------------------------------
+// Agente en el panel
+// ---------------------------------------------------------------------------
+
+/** Tope de iteraciones de un run: un modelo confundido no puede dar vueltas para siempre. */
+export const AGENT_MAX_STEPS = 30;
+
+/**
+ * Lo que el servidor cuenta al panel mientras trabaja. El panel pinta cada evento segun llega, asi
+ * que `text` y `reasoning` son deltas, no el mensaje entero.
+ */
+export const AgentEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("reasoning"), delta: z.string() }),
+  z.object({ type: z.literal("text"), delta: z.string() }),
+  z.object({ type: z.literal("tool"), callId: z.string(), name: z.string(), input: z.unknown() }),
+  z.object({ type: z.literal("toolResult"), callId: z.string(), name: z.string(), ok: z.boolean(), summary: z.string() }),
+  /** Publicacion de verdad: el bucle se para aqui hasta que llegue un agent.confirm. */
+  z.object({
+    type: z.literal("confirm"),
+    confirmId: z.string(),
+    network: NetworkSchema,
+    text: z.string(),
+    account: z.string().optional(),
+  }),
+  z.object({ type: z.literal("done"), steps: z.number().int() }),
+  z.object({ type: z.literal("error"), message: z.string(), code: z.string().optional() }),
+]);
+export type AgentEvent = z.infer<typeof AgentEventSchema>;
+
+// ---------------------------------------------------------------------------
 // Frames del puente WebSocket
 // ---------------------------------------------------------------------------
 
@@ -139,11 +171,23 @@ export const FrameSchema = z.discriminatedUnion("kind", [
   /** Mantiene vivo el service worker de MV3 y detecta cortes. */
   z.object({ kind: z.literal("ping"), t: z.number() }),
   z.object({ kind: z.literal("pong"), t: z.number() }),
+
+  /**
+   * Unica direccion en la que manda la extension: el panel pide ejecutar una instruccion y el
+   * servidor le devuelve eventos. Las herramientas que el modelo decida usar bajan despues como
+   * tramas `request` normales, asi que la allowlist y los plazos se aplican igual que siempre.
+   */
+  z.object({ kind: z.literal("agent.start"), runId: z.string(), prompt: z.string().min(1) }),
+  z.object({ kind: z.literal("agent.cancel"), runId: z.string() }),
+  z.object({ kind: z.literal("agent.confirm"), runId: z.string(), confirmId: z.string(), approved: z.boolean() }),
+  z.object({ kind: z.literal("agent.event"), runId: z.string(), event: AgentEventSchema }),
 ]);
 export type Frame = z.infer<typeof FrameSchema>;
 
 export type RequestFrame = Extract<Frame, { kind: "request" }>;
 export type ResponseFrame = Extract<Frame, { kind: "response" }>;
+/** Las que manda la extension por iniciativa propia. */
+export type AgentFrame = Extract<Frame, { kind: `agent.${string}` }>;
 
 /** Codigos de error que el servidor traduce a mensajes utiles para el agente. */
 export const ErrorCodes = {
@@ -161,6 +205,12 @@ export const ErrorCodes = {
   TAB_HIDDEN: "tab_hidden",
   DEADLINE_EXCEEDED: "deadline_exceeded",
   BAD_REQUEST: "bad_request",
+  /** El panel pidio algo pero el servidor no tiene modelo configurado en su .env. */
+  LLM_NOT_CONFIGURED: "llm_not_configured",
+  LLM_UNAUTHORIZED: "llm_unauthorized",
+  LLM_ERROR: "llm_error",
+  AGENT_MAX_STEPS: "agent_max_steps",
+  AGENT_CANCELLED: "agent_cancelled",
 } as const;
 
 /**

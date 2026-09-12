@@ -8,6 +8,7 @@ import {
   type Command,
   type Frame,
   type PanelContext,
+  type RequestOrigin,
 } from "@webbot/shared";
 
 import { BridgeError } from "./bridge.js";
@@ -23,7 +24,7 @@ import { webbotInstructions, WEBBOT_TOOLS, WEBBOT_TOOLS_BY_NAME } from "./tools.
 
 /** Lo que el runner necesita del puente. Un interfaz asi de estrecho hace trivial falsearlo. */
 export interface AgentBridge {
-  send(command: Command): Promise<unknown>;
+  send(command: Command, origin: RequestOrigin): Promise<unknown>;
   sendToExtension(frame: Frame): void;
 }
 
@@ -179,7 +180,7 @@ export function createAgentRunner(
     }
 
     try {
-      const result = await bridge.send(command);
+      const result = await bridge.send(command, "panel");
       const content = serializeResult(command, result);
       emit(runId, { type: "toolResult", callId: call.id, name: call.name, ok: true, summary: summarize(content) });
       return { id: call.id, name: call.name, ok: true, content };

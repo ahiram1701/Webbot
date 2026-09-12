@@ -11,6 +11,7 @@ import {
   type Command,
   type Frame,
   type LlmStatus,
+  type RequestOrigin,
 } from "@webbot/shared";
 
 import { log } from "./config.js";
@@ -118,8 +119,12 @@ export class Bridge {
     if (socket && socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
   }
 
-  /** Envia un comando a la extension y espera su respuesta. */
-  send(command: Command): Promise<unknown> {
+  /**
+   * Envia un comando a la extension y espera su respuesta. `origin` no es opcional a proposito: el
+   * registro de la extension lo usa para decir quien pidio cada cosa, y una etiqueta equivocada ahi
+   * es peor que no tenerla.
+   */
+  send(command: Command, origin: RequestOrigin): Promise<unknown> {
     const socket = this.client;
     if (!socket || socket.readyState !== socket.OPEN) {
       return Promise.reject(
@@ -147,7 +152,7 @@ export class Bridge {
       this.pending.set(id, { resolve, reject, timer, socket });
       // El plazo viaja con la peticion: la extension no ejecuta una accion irreversible despues de
       // que aqui ya se haya dado por perdida.
-      socket.send(JSON.stringify({ kind: "request", id, command, timeoutMs } satisfies Frame));
+      socket.send(JSON.stringify({ kind: "request", id, command, origin, timeoutMs } satisfies Frame));
     });
   }
 

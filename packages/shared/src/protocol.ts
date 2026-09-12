@@ -138,6 +138,13 @@ export const LlmStatusSchema = z.object({
 export type LlmStatus = z.infer<typeof LlmStatusSchema>;
 
 /**
+ * Quien pidio el comando. Viaja con cada peticion para que el registro de la extension pueda decir
+ * si algo lo hizo un agente externo o tu mismo desde el panel, que es la pregunta que se le hace.
+ */
+export const RequestOriginSchema = z.enum(["mcp", "panel", "cli"]);
+export type RequestOrigin = z.infer<typeof RequestOriginSchema>;
+
+/**
  * Lo que el servidor cuenta al panel mientras trabaja. El panel pinta cada evento segun llega, asi
  * que `text` y `reasoning` son deltas, no el mensaje entero.
  */
@@ -176,6 +183,7 @@ export const FrameSchema = z.discriminatedUnion("kind", [
     kind: z.literal("request"),
     id: z.string(),
     command: CommandSchema,
+    origin: RequestOriginSchema.optional(),
     /**
      * Cuanto va a esperar el servidor. La extension lo convierte en un plazo limite para que una
      * accion irreversible que llegue tarde (pestana congelada, pagina lenta) se aborte en vez de

@@ -136,6 +136,11 @@ tocar sigue siendo la allowlist de Opciones.
 El botón **Detener** corta el bucle en seco, y **Nueva** empieza una conversación desde cero. Cerrar
 el panel no cancela nada: el historial vive en el service worker y al reabrirlo está todo.
 
+El botón **Registro** cambia la columna central por las últimas 40 acciones ejecutadas en el
+navegador, con la hora, sobre qué actuaron, el motivo cuando fallaron y **quién las pidió**: `panel`,
+`mcp` o `cli`. Es la única forma de ver qué ha hecho un agente externo mientras no mirabas —lo que
+pides tú ya se lee en la conversación—, y se actualiza solo mientras lo tienes abierto.
+
 ## Herramientas MCP
 
 | Herramienta | Qué hace |

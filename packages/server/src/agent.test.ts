@@ -87,6 +87,26 @@ describe("agente del panel", () => {
     expect(events.map((event) => event.type)).toEqual(["tool", "toolResult", "text", "done"]);
   });
 
+  it("identifica como 'panel' lo que pide, para no confundirlo con un agente externo", async () => {
+    const provider = fakeProvider([
+      turn({ stop: "tools", toolCalls: [{ id: "c1", name: "webbot_list_tabs", input: {} }] }),
+      turn({ text: "Ahi las tienes.", stop: "end" }),
+    ]);
+    const origenes: string[] = [];
+    const { bridge, events } = fakeBridge();
+    const espiado: AgentBridge = {
+      ...bridge,
+      send(command, origin) {
+        origenes.push(origin);
+        return bridge.send(command, origin);
+      },
+    };
+
+    createAgentRunner(espiado, provider).handle({ kind: "agent.start", runId: "r1", prompt: "que pestanas hay" });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    expect(origenes).toEqual(["panel"]);
+  });
   it("le pasa al modelo la pestana que la persona tiene delante", async () => {
     const provider = fakeProvider([turn({ text: "Va de dominios de ejemplo.", stop: "end" })]);
     const { bridge, events } = fakeBridge();

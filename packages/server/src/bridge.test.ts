@@ -98,7 +98,7 @@ afterEach(async () => {
 describe("Bridge", () => {
   it("rechaza enviar comandos si no hay extension conectada", async () => {
     const target = await startBridge();
-    await expect(target.send({ type: "browser.listTabs" })).rejects.toMatchObject({
+    await expect(target.send({ type: "browser.listTabs" }, "mcp")).rejects.toMatchObject({
       code: ErrorCodes.NOT_CONNECTED,
     });
   });
@@ -112,9 +112,25 @@ describe("Bridge", () => {
     });
     await waitForConnected(target);
 
-    await expect(target.send({ type: "browser.listTabs" })).resolves.toEqual({ tabs: [{ id: 7 }] });
+    await expect(target.send({ type: "browser.listTabs" }, "mcp")).resolves.toEqual({ tabs: [{ id: 7 }] });
   });
 
+  it("marca quien pidio cada comando, que es lo que el registro de la extension ensena", async () => {
+    const target = await startBridge();
+    const recibidos: Array<Extract<Frame, { kind: "request" }>> = [];
+    await connectFakeExtension(target, {
+      onRequest: (frame, ws) => {
+        recibidos.push(frame);
+        ws.send(JSON.stringify({ kind: "response", id: frame.id, ok: true, result: {} } satisfies Frame));
+      },
+    });
+    await waitForConnected(target);
+
+    await target.send({ type: "browser.listTabs" }, "mcp");
+    await target.send({ type: "browser.listTabs" }, "panel");
+
+    expect(recibidos.map((frame) => frame.origin)).toEqual(["mcp", "panel"]);
+  });
   it("anuncia en el welcome el modelo que tiene detras", async () => {
     const target = await startBridge();
     target.describeLlm({ ready: true, model: "falso:modelo" });
@@ -157,7 +173,7 @@ describe("Bridge", () => {
     });
     await waitForConnected(target);
 
-    await expect(target.send({ type: "browser.listTabs" })).rejects.toMatchObject({
+    await expect(target.send({ type: "browser.listTabs" }, "mcp")).rejects.toMatchObject({
       code: ErrorCodes.ELEMENT_NOT_FOUND,
       message: "no encontrado",
     });
@@ -189,8 +205,8 @@ describe("Bridge", () => {
     });
     await waitForConnected(target);
 
-    await target.send({ type: "browser.listTabs" });
-    await target.send({ type: "social.post", network: "x", text: "hola", dryRun: true });
+    await target.send({ type: "browser.listTabs" }, "mcp");
+    await target.send({ type: "social.post", network: "x", text: "hola", dryRun: true }, "mcp");
 
     expect(plazos["browser.listTabs"]).toBe(1_000);
     expect(plazos["social.post"]).toBe(SOCIAL_POST_TIMEOUT_MS);
@@ -201,7 +217,7 @@ describe("Bridge", () => {
     await connectFakeExtension(target, { onRequest: () => {} });
     await waitForConnected(target);
 
-    await expect(target.send({ type: "browser.listTabs" })).rejects.toMatchObject({ code: ErrorCodes.TIMEOUT });
+    await expect(target.send({ type: "browser.listTabs" }, "mcp")).rejects.toMatchObject({ code: ErrorCodes.TIMEOUT });
   });
 
   it("rechaza las peticiones pendientes si la extension se desconecta", async () => {
@@ -209,7 +225,7 @@ describe("Bridge", () => {
     const ws = await connectFakeExtension(target, { onRequest: () => ws.close() });
     await waitForConnected(target);
 
-    await expect(target.send({ type: "browser.listTabs" })).rejects.toMatchObject({
+    await expect(target.send({ type: "browser.listTabs" }, "mcp")).rejects.toMatchObject({
       code: ErrorCodes.NOT_CONNECTED,
     });
   });
@@ -220,7 +236,7 @@ describe("Bridge", () => {
     await waitForConnected(target);
 
     const inicio = Date.now();
-    const pendiente = expect(target.send({ type: "browser.listTabs" })).rejects.toMatchObject({
+    const pendiente = expect(target.send({ type: "browser.listTabs" }, "mcp")).rejects.toMatchObject({
       code: ErrorCodes.NOT_CONNECTED,
     });
     // Una segunda conexion sustituye a la primera, como pasaba en bucle al recargar la extension.

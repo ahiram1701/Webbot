@@ -47,6 +47,7 @@
         font-size: 13px;
         margin: 0;
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: 8px;
       }
@@ -217,6 +218,64 @@
         padding-left: 8px;
       }
 
+      /* Registro de acciones: lo que se ha hecho en el navegador, venga de donde venga. Una fila
+         por accion, y el motivo solo cuando fallo, que es cuando importa. */
+      .action-head {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 11px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 6px;
+      }
+      .action-head span {
+        flex: 1;
+      }
+      .action-head button {
+        font: inherit;
+        font-size: 11px;
+        color: var(--muted);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 2px 7px;
+        cursor: pointer;
+      }
+      .action-head button:hover {
+        color: var(--fg);
+        border-color: var(--muted);
+      }
+      .action {
+        font-size: 11px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 6px;
+      }
+      .action .when {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        flex: none;
+      }
+      .action .name {
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        overflow-wrap: anywhere;
+      }
+      .action .target {
+        color: var(--muted);
+        overflow-wrap: anywhere;
+        flex: 1;
+      }
+      .action .who {
+        color: var(--muted);
+        flex: none;
+      }
+      .action .why {
+        flex-basis: 100%;
+        color: var(--bad);
+        overflow-wrap: anywhere;
+      }
       .confirm {
         border: 1px solid var(--bad);
         border-radius: 8px;
@@ -360,6 +419,7 @@
       <h1>
         <span class="dot" id="dot"></span><span id="state">Comprobando...</span><span class="grow"></span>
         <button id="reset" title="Empezar una conversacion nueva">Nueva</button>
+        <button id="registro" title="Que se ha hecho en el navegador">Registro</button>
         <button id="reconnect">Reconectar</button>
         <button id="options">Opciones</button>
       </h1>

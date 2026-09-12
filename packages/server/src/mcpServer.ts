@@ -29,7 +29,7 @@ export function createWebbotMcpServer(bridge: Bridge): McpServer {
 
   const run = async (command: Command): Promise<ToolResult> => {
     try {
-      return ok(await bridge.send(command));
+      return ok(await bridge.send(command, "mcp"));
     } catch (error) {
       return fail(error);
     }
@@ -61,7 +61,7 @@ export function createWebbotMcpServer(bridge: Bridge): McpServer {
         });
       }
       try {
-        return ok({ connected: true, bridgePort: bridge.port, ...((await bridge.send({ type: "config.get" })) as object) });
+        return ok({ connected: true, bridgePort: bridge.port, ...((await bridge.send({ type: "config.get" }, "mcp")) as object) });
       } catch (error) {
         return fail(error);
       }

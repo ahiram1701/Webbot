@@ -1,4 +1,4 @@
-import { FrameSchema, PROTOCOL_VERSION, type Frame, type LlmStatus } from "@webbot/shared";
+import { FrameSchema, PROTOCOL_VERSION, type Command, type Frame, type LlmStatus } from "@webbot/shared";
 
 import { agentConnectionLost, handleAgentEvent, registerPanel } from "./agent.js";
 import { runCommand } from "./commands/index.js";
@@ -47,18 +47,50 @@ function send(frame: Frame, target: WebSocket | null = socket): void {
 const DEADLINE_MARGIN_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/**
+ * Sobre que actuo el comando, para que el registro diga algo. "browser.openTab" solo no responde a
+ * la pregunta que se le hace al registro, que es que ha tocado el agente en mi navegador.
+ */
+function describeCommand(command: Command): string | undefined {
+  switch (command.type) {
+    case "browser.openTab":
+    case "browser.navigate":
+      return command.url;
+    case "social.post":
+      return command.dryRun ? `${command.network} (ensayo)` : command.network;
+    case "flow.run":
+    case "flow.save":
+      return command.name;
+    case "browser.closeTab":
+    case "page.waitFor":
+    case "page.extract":
+    case "page.links":
+    case "page.outline":
+    case "page.click":
+    case "page.type":
+    case "page.scroll":
+    case "page.screenshot":
+      return `pestana ${command.tabId}`;
+    default:
+      return undefined;
+  }
+}
+
 /** La respuesta vuelve por el socket que trajo la peticion, no por el que sea el actual al terminar. */
 async function handleRequest(frame: Extract<Frame, { kind: "request" }>, origin: WebSocket): Promise<void> {
+  // Un servidor viejo no manda quien lo pide; el unico camino que tenia entonces era el MCP.
+  const who = frame.origin ?? "mcp";
+  const common = { at: Date.now(), command: frame.command.type, target: describeCommand(frame.command), origin: who };
   try {
     const deadlineAt = Date.now() + (frame.timeoutMs ?? DEFAULT_TIMEOUT_MS) - DEADLINE_MARGIN_MS;
     const result = await runCommand(frame.command, { deadlineAt });
     send({ kind: "response", id: frame.id, ok: true, result }, origin);
-    await appendLog({ at: Date.now(), command: frame.command.type, ok: true });
+    await appendLog({ ...common, ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const code = (error as { code?: string }).code;
     send({ kind: "response", id: frame.id, ok: false, error: { message, code } }, origin);
-    await appendLog({ at: Date.now(), command: frame.command.type, ok: false, detail: message });
+    await appendLog({ ...common, ok: false, detail: code ? `${code}: ${message}` : message });
   }
 }
 

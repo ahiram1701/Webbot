@@ -2,7 +2,14 @@ import type { LlmStatus, PanelContext } from "@webbot/shared";
 
 import { activeTab } from "../background/activeTab.js";
 import { PANEL_PORT, type PanelMessage, type PanelUpdate } from "../background/agent.js";
-import { getSettings } from "../background/settings.js";
+import {
+  ACTION_LOG_KEY,
+  ACTION_LOG_LIMIT,
+  clearLog,
+  getLog,
+  getSettings,
+  type ActionLogEntry,
+} from "../background/settings.js";
 import { applyEvent, answerConfirm, type TranscriptEntry } from "../background/transcript.js";
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -21,6 +28,9 @@ let running = false;
 let tab: PanelContext | null = null;
 /** Lo que el servidor dijo de si mismo al conectar; null mientras no haya conexion. */
 let llm: LlmStatus | null = null;
+/** La columna central ensena la conversacion o el registro de acciones, nunca las dos. */
+let view: "chat" | "registro" = "chat";
+let actions: ActionLogEntry[] = [];
 /** Ultima senal de vida del agente, para poder decir cuanto lleva callado. */
 let lastSignAt = Date.now();
 let activityTimer: ReturnType<typeof setInterval> | null = null;
@@ -59,8 +69,14 @@ async function renderStatus(): Promise<void> {
   refreshQuick();
 }
 
-chrome.storage.onChanged.addListener((_changes, area) => {
+chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "session" && area !== "local") return;
+  // El registro cambia con cada comando: si entrara por el camino de abajo releeria ajustes y
+  // consultaria la pestana activa en cada accion del agente, para nada.
+  if (ACTION_LOG_KEY in changes) {
+    void loadActions();
+    return;
+  }
   void renderStatus();
   // Tocar la allowlist en Opciones cambia si la pestana de al lado esta permitida o no.
   void renderTab();
@@ -97,7 +113,7 @@ async function renderTab(): Promise<void> {
 /** Un atajo que solo puede acabar en error es peor que no ofrecerlo; el title dice por que. */
 function refreshQuick(): void {
   const box = $("quick");
-  box.hidden = running || tab === null;
+  box.hidden = running || tab === null || view === "registro";
   const motivo =
     llm !== null && !llm.ready
       ? "El servidor no tiene modelo configurado."
@@ -108,6 +124,79 @@ function refreshQuick(): void {
     chip.disabled = motivo !== "";
     chip.title = motivo;
   }
+}
+
+// --- Registro de acciones --------------------------------------------------
+
+/**
+ * Lo que se ha hecho en el navegador, venga del panel o de un agente externo por MCP. Se escribia
+ * desde el primer dia y no lo leia nadie: lo que pide el panel ya se ve en su conversacion, pero lo
+ * que llega por MCP no se veia en ningun sitio.
+ */
+async function loadActions(): Promise<void> {
+  actions = await getLog();
+  if (view === "registro") render();
+}
+
+const hhmmss = (at: number): string =>
+  new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+function actionLine(entry: ActionLogEntry): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "action";
+
+  const mark = document.createElement("span");
+  mark.textContent = entry.ok ? "✓" : "✕";
+  mark.style.color = entry.ok ? "var(--ok)" : "var(--bad)";
+
+  const when = document.createElement("span");
+  when.className = "when";
+  when.textContent = hhmmss(entry.at);
+
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = entry.command;
+
+  const target = document.createElement("span");
+  target.className = "target";
+  target.textContent = entry.target ?? "";
+
+  const who = document.createElement("span");
+  who.className = "who";
+  who.textContent = entry.origin ?? "mcp";
+
+  row.append(mark, when, name, target, who);
+
+  // El motivo solo cuando fallo: en el camino feliz no aporta nada y ocupa el doble.
+  if (!entry.ok && entry.detail) {
+    const why = document.createElement("span");
+    why.className = "why";
+    why.textContent = entry.detail;
+    row.append(why);
+  }
+  return row;
+}
+
+function renderActions(): void {
+  const head = document.createElement("div");
+  head.className = "action-head";
+  const label = document.createElement("span");
+  label.textContent = `Ultimas ${ACTION_LOG_LIMIT} acciones`;
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.textContent = "Vaciar";
+  clear.addEventListener("click", () => void clearLog());
+  head.append(label, clear);
+  logEl.append(head);
+
+  if (actions.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "Todavia no se ha hecho nada en el navegador.";
+    logEl.append(empty);
+    return;
+  }
+  for (const entry of actions) logEl.append(actionLine(entry));
 }
 
 // --- Pintado de la conversacion -------------------------------------------
@@ -220,6 +309,12 @@ function render(): void {
   const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 40;
   logEl.replaceChildren();
 
+  if (view === "registro") {
+    renderActions();
+    renderFooter(atBottom);
+    return;
+  }
+
   if (transcript.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty";
@@ -257,11 +352,18 @@ function render(): void {
     }
   }
 
+  renderFooter(atBottom);
+}
+
+function renderFooter(atBottom: boolean): void {
   sendEl.textContent = running ? "Detener" : "Enviar";
   sendEl.classList.toggle("stop", running);
+  $("registro").textContent = view === "registro" ? "Volver" : "Registro";
   refreshActivity();
   refreshQuick();
-  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+  // Solo la conversacion crece hacia abajo: el registro va del mas reciente al mas viejo, y seguir
+  // su final seria saltar a lo mas antiguo cada vez que pasa algo.
+  if (view === "chat" && atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
 
 function answer(confirmId: string, approved: boolean): void {
@@ -303,6 +405,8 @@ $("composer").addEventListener("submit", (event) => {
   }
   const text = promptEl.value.trim();
   if (!text) return;
+  // Mandar algo es querer ver la respuesta, no seguir mirando el registro.
+  view = "chat";
   promptEl.value = "";
   promptEl.style.height = "auto";
   post({ type: "prompt", text });
@@ -331,10 +435,17 @@ $("reconnect").addEventListener("click", async () => {
 
 $("options").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
+$("registro").addEventListener("click", () => {
+  view = view === "registro" ? "chat" : "registro";
+  if (view === "registro") void loadActions();
+  render();
+});
+
 // Los atajos mandan la instruccion tal cual: el worker devuelve el snapshot con la entrada ya puesta.
 $("quick").addEventListener("click", (event) => {
   const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-prompt]");
   if (!chip || chip.disabled || running) return;
+  view = "chat";
   post({ type: "prompt", text: chip.dataset.prompt ?? "" });
 });
 

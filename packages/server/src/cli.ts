@@ -111,7 +111,7 @@ async function main(): Promise<void> {
   log("esperando a la extension...");
   try {
     await waitForExtension(bridge);
-    const result = await bridge.send(command);
+    const result = await bridge.send(command, "cli");
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

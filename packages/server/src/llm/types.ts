@@ -15,12 +15,20 @@ export interface LlmTool {
   schema: unknown;
 }
 
+/** Imagen que acompana al resultado de una herramienta. Hoy solo la produce la captura. */
+export interface LlmImage {
+  mediaType: string;
+  base64: string;
+}
+
 export interface LlmToolResult {
   id: string;
   name: string;
   ok: boolean;
   /** El resultado ya serializado: los adaptadores no inventan formato. */
   content: string;
+  /** Solo viaja si el proveedor ve imagenes; al resto ni se les manda. */
+  image?: LlmImage;
 }
 
 export type LlmInput = { kind: "user"; text: string } | { kind: "toolResults"; results: LlmToolResult[] };
@@ -53,6 +61,11 @@ export interface LlmConversation {
 export interface LlmProvider {
   /** Para ensenarlo en el panel: "anthropic:claude-opus-5". */
   readonly label: string;
+  /**
+   * Si acepta imagenes en los resultados de herramienta. No se puede detectar mirando el modelo,
+   * asi que sale de la configuracion: mandarle una captura a uno de solo texto devuelve un 400.
+   */
+  readonly vision: boolean;
   start(system: string, tools: LlmTool[]): LlmConversation;
 }
 

@@ -126,6 +126,30 @@ dominios permite y **con qué modelo**, que el servidor anuncia al conectar. Si 
 configurado lo pone en ámbar con la línea del `.env` que falta, en vez de dejar que lo descubras
 mandando un mensaje y viéndolo fallar.
 
+### Que vea la página
+
+Por defecto `webbot_screenshot` captura un PNG que el modelo no llega a ver: viaja como una nota,
+no como imagen. Con un modelo que tenga visión se enciende:
+
+```bash
+WEBBOT_LLM_VISION=on
+```
+
+Está apagado a propósito, porque la mayoría de los modelos que se enchufan por la capa
+`/chat/completions` son de solo texto y devuelven un 400 al recibir una imagen — `nemotron`, sin ir
+más lejos. Enciéndelo solo con un modelo que vea.
+
+Los dos caminos no son simétricos, y conviene saberlo si algún proveedor se atraganta: Anthropic
+admite la imagen **dentro** del propio `tool_result`, mientras que `/chat/completions` solo acepta
+texto en un mensaje `role:"tool"`, así que ahí la captura va detrás, como un mensaje más del
+usuario. Es la vía estándar del formato, pero significa que un proveedor compatible a medias puede
+aceptar las herramientas y aun así rechazar las imágenes.
+
+Con la visión encendida el modelo recibe además la instrucción de usarla para entender la
+distribución de la página —qué tapa qué, dónde está algo— y no para leer texto, que sigue saliendo
+mejor y más barato por `webbot_extract`. Ojo con una cosa: la captura **trae la pestaña al primer
+plano**, porque `captureVisibleTab` solo fotografía la pestaña activa.
+
 ### Qué te va a preguntar
 
 Solo una cosa: **publicar de verdad**. El agente hace `dryRun` libremente, pero antes de pulsar
@@ -158,7 +182,7 @@ Se añade el hostname exacto, no el dominio padre: permitir `gist.github.com` no
 | `webbot_describe` | Inspecciona un target **incluidos los elementos ocultos**: por qué algo no se deja pulsar. |
 | `webbot_extract` | Texto de la página: `readable`, `full` o `selectors`. |
 | `webbot_links` | Enlaces con filtro por texto o por dominio propio. |
-| `webbot_screenshot` | Captura PNG de la parte visible. |
+| `webbot_screenshot` | Captura PNG de la parte visible. Le llega al modelo como imagen si tiene visión. |
 | `webbot_click` / `webbot_type` / `webbot_scroll` / `webbot_wait_for` | Interacción. |
 | `webbot_post_social` | Publica en Facebook o X. |
 | `webbot_flow_list` / `webbot_flow_run` | Flujos guardados. |

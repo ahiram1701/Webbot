@@ -23,13 +23,17 @@ export interface OpenAiOptions {
   apiKey: string;
   model: string;
   baseUrl: string;
+  vision?: boolean;
   /** Solo para los tests. */
   fetchImpl?: FetchLike;
 }
 
+/** Un mensaje multimodal se manda por partes; el texto suelto sigue valiendo como string. */
+type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
+  content: string | ContentPart[] | null;
   tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
 }
@@ -152,6 +156,7 @@ export function createOpenAiProvider(options: OpenAiOptions): LlmProvider {
 
   return {
     label: `openai:${options.model}`,
+    vision: options.vision ?? false,
     start(system: string, tools: LlmTool[]): LlmConversation {
       const toolParams = tools.map((entry) => ({
         type: "function" as const,
@@ -167,6 +172,21 @@ export function createOpenAiProvider(options: OpenAiOptions): LlmProvider {
             // Aqui va un mensaje por llamada, no un bloque con todas: es lo que espera este formato.
             for (const result of input.results) {
               messages.push({ role: "tool", tool_call_id: result.id, content: result.content });
+              // Asimetria real con Anthropic, que admite la imagen dentro del tool_result:
+              // /chat/completions solo acepta texto en un mensaje role:"tool", asi que la captura
+              // tiene que ir detras como mensaje del usuario. Es la via estandar del formato.
+              if (result.image) {
+                messages.push({
+                  role: "user",
+                  content: [
+                    { type: "text", text: `Captura devuelta por ${result.name}:` },
+                    {
+                      type: "image_url",
+                      image_url: { url: `data:${result.image.mediaType};base64,${result.image.base64}` },
+                    },
+                  ],
+                });
+              }
             }
           }
 

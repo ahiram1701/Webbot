@@ -34,6 +34,59 @@ function provider(fetchImpl: FetchLike) {
  * al final.
  */
 describe("adaptador OpenAI-compatible", () => {
+  it("manda la captura en un mensaje aparte, porque un role:'tool' no admite imagenes", async () => {
+    const captured: { body?: unknown } = {};
+    const conversation = createOpenAiProvider({
+      apiKey: "clave",
+      model: "modelo-x",
+      baseUrl: "http://127.0.0.1:1234/v1",
+      vision: true,
+      fetchImpl: streamingFetch([sse({ choices: [{ delta: { content: "veo un boton" } }] }), "data: [DONE]\n\n"], captured),
+    }).start("sistema", TOOLS);
+
+    await conversation.send(
+      {
+        kind: "toolResults",
+        results: [
+          {
+            id: "call_1",
+            name: "webbot_screenshot",
+            ok: true,
+            content: '{"tabId":7}',
+            image: { mediaType: "image/png", base64: "QUJD" },
+          },
+        ],
+      },
+      { onText: () => {} },
+      new AbortController().signal,
+    );
+
+    const { messages } = captured.body as { messages: Array<{ role: string; content: unknown }> };
+    const tool = messages.find((m) => m.role === "tool");
+    const user = messages.find((m) => m.role === "user");
+    expect(tool?.content).toBe('{"tabId":7}');
+    expect(user?.content).toEqual([
+      { type: "text", text: "Captura devuelta por webbot_screenshot:" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } },
+    ]);
+  });
+
+  it("sin imagen no mete ningun mensaje de mas", async () => {
+    const captured: { body?: unknown } = {};
+    const conversation = provider(
+      streamingFetch([sse({ choices: [{ delta: { content: "listo" } }] }), "data: [DONE]\n\n"], captured),
+    ).start("sistema", TOOLS);
+
+    await conversation.send(
+      { kind: "toolResults", results: [{ id: "call_1", name: "webbot_outline", ok: true, content: "{}" }] },
+      { onText: () => {} },
+      new AbortController().signal,
+    );
+
+    const { messages } = captured.body as { messages: Array<{ role: string }> };
+    expect(messages.filter((m) => m.role === "user")).toHaveLength(0);
+  });
+
   it("recompone una tool call repartida entre varios chunks", async () => {
     const conversation = provider(
       streamingFetch([

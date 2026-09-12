@@ -16,6 +16,7 @@ import {
   LlmError,
   NO_LLM_MESSAGE,
   type LlmConversation,
+  type LlmImage,
   type LlmInput,
   type LlmProvider,
   type LlmToolResult,
@@ -41,13 +42,24 @@ const MAX_RESULT_CHARS = 60_000;
 /** Lo que se ensena en el panel junto a cada paso. */
 const MAX_SUMMARY_CHARS = 300;
 
-const SYSTEM = [
-  webbotInstructions("panel"),
-  "Hablas directamente con la persona que usa este navegador a traves de un panel lateral de la extension, no con otro agente.",
-  "Responde en el idioma en el que te escriban, en pocas frases y sin volcar JSON crudo: resume lo que encontraste.",
-  "Cuando una herramienta falle, lee el codigo de error y corrige: element_not_found se arregla mirando la pagina con webbot_outline, domain_blocked lo resuelve la persona con el boton 'Permitir' que sale en el propio paso, asi que dile que dominio hace falta y no lo reintentes hasta que te lo diga.",
-  "Cada mensaje puede venir precedido de la pestana que la persona tiene delante: 'esta pagina', 'aqui' o 'lo que estoy viendo' se refieren a ese tabId. Usalo directamente, sin volver a listar pestanas ni abrir una nueva. Si la pestana aparece como NO permitida, dilo y no lo intentes.",
-].join(" ");
+/**
+ * La linea de la captura solo se dice si el modelo puede verla: invitarle a mirar una foto que no
+ * le va a llegar es peor que no ofrecersela, porque gasta un paso y no aclara nada.
+ */
+function systemPrompt(vision: boolean): string {
+  return [
+    webbotInstructions("panel"),
+    "Hablas directamente con la persona que usa este navegador a traves de un panel lateral de la extension, no con otro agente.",
+    "Responde en el idioma en el que te escriban, en pocas frases y sin volcar JSON crudo: resume lo que encontraste.",
+    "Cuando una herramienta falle, lee el codigo de error y corrige: element_not_found se arregla mirando la pagina con webbot_outline, domain_blocked lo resuelve la persona con el boton 'Permitir' que sale en el propio paso, asi que dile que dominio hace falta y no lo reintentes hasta que te lo diga.",
+    "Cada mensaje puede venir precedido de la pestana que la persona tiene delante: 'esta pagina', 'aqui' o 'lo que estoy viendo' se refieren a ese tabId. Usalo directamente, sin volver a listar pestanas ni abrir una nueva. Si la pestana aparece como NO permitida, dilo y no lo intentes.",
+    ...(vision
+      ? [
+          "Puedes VER la pagina: webbot_screenshot te devuelve la captura y te llega como imagen. Usala cuando el outline no te aclare la distribucion (que tapa que, donde esta algo) o cuando lleves dos intentos fallidos sobre el mismo elemento. Para leer texto sigue siendo mejor webbot_extract, y ojo: la captura trae la pestana al primer plano.",
+        ]
+      : []),
+  ].join(" ");
+}
 
 interface PendingConfirm {
   confirmId: string;
@@ -74,17 +86,27 @@ function summarize(value: string): string {
   return flat.length > MAX_SUMMARY_CHARS ? `${flat.slice(0, MAX_SUMMARY_CHARS)}...` : flat;
 }
 
+const DATA_URL = /^data:(image\/[a-z+]+);base64,(.+)$/i;
+
 /**
- * Serializa el resultado para el modelo. Una captura de pantalla se queda fuera: el data URL ocupa
- * cientos de kilobytes y por este camino el modelo no puede verla de todas formas.
+ * Serializa el resultado para el modelo. La captura se saca del JSON siempre: el data URL ocupa
+ * cientos de kilobytes y como texto no le dice nada a nadie. Si el proveedor ve imagenes, vuelve
+ * aparte como imagen de verdad; si no, se queda en una nota y no se manda.
  */
-function serializeResult(command: Command, result: unknown): string {
+function serializeResult(command: Command, result: unknown, vision: boolean): { content: string; image?: LlmImage } {
   if (command.type === "page.screenshot" && result && typeof result === "object") {
     const { dataUrl, ...rest } = result as { dataUrl?: string };
-    return JSON.stringify({ ...rest, dataUrl: dataUrl ? "[PNG omitido: no viaja al modelo]" : undefined });
+    const match = vision && dataUrl ? DATA_URL.exec(dataUrl) : null;
+    const image = match?.[1] && match[2] ? { mediaType: match[1], base64: match[2] } : undefined;
+    const png = image
+      ? "[PNG adjunto]"
+      : dataUrl
+        ? "[PNG omitido: este modelo no ve imagenes]"
+        : undefined;
+    return { content: JSON.stringify({ ...rest, png }), image };
   }
   const json = JSON.stringify(result ?? null);
-  return json.length > MAX_RESULT_CHARS ? `${json.slice(0, MAX_RESULT_CHARS)}... [recortado]` : json;
+  return { content: json.length > MAX_RESULT_CHARS ? `${json.slice(0, MAX_RESULT_CHARS)}... [recortado]` : json };
 }
 
 /**
@@ -181,9 +203,9 @@ export function createAgentRunner(
 
     try {
       const result = await bridge.send(command, "panel");
-      const content = serializeResult(command, result);
+      const { content, image } = serializeResult(command, result, provider?.vision ?? false);
       emit(runId, { type: "toolResult", callId: call.id, name: call.name, ok: true, summary: summarize(content) });
-      return { id: call.id, name: call.name, ok: true, content };
+      return { id: call.id, name: call.name, ok: true, content, image };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const code = error instanceof BridgeError ? error.code : undefined;
@@ -261,7 +283,7 @@ export function createAgentRunner(
 
     // El mismo runId continua la conversacion: el panel solo manda texto y el historial vive aqui.
     const run: Run = existing ?? {
-      conversation: provider.start(SYSTEM, tools),
+      conversation: provider.start(systemPrompt(provider.vision), tools),
       controller: new AbortController(),
       busy: false,
       cancelled: false,

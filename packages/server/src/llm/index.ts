@@ -21,6 +21,8 @@ export interface LlmConfig {
   apiKey: string;
   baseUrl: string;
   thinking: boolean;
+  /** Si se le mandan las capturas de pantalla al modelo. */
+  vision: boolean;
   /** Techo por turno del modelo, en ms. */
   timeoutMs: number;
 }
@@ -38,8 +40,18 @@ export function createProvider(config: LlmConfig | null): LlmProvider | null {
         ErrorCodes.LLM_NOT_CONFIGURED,
       );
     }
-    return createAnthropicProvider({ apiKey: config.apiKey, model: config.model, thinking: config.thinking });
+    return createAnthropicProvider({
+      apiKey: config.apiKey,
+      model: config.model,
+      thinking: config.thinking,
+      vision: config.vision,
+    });
   }
   // Un modelo local (Ollama, LM Studio) no pide clave, asi que aqui solo hace falta la URL.
-  return createOpenAiProvider({ apiKey: config.apiKey, model: config.model, baseUrl: config.baseUrl });
+  return createOpenAiProvider({
+    apiKey: config.apiKey,
+    model: config.model,
+    baseUrl: config.baseUrl,
+    vision: config.vision,
+  });
 }

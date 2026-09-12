@@ -66,6 +66,9 @@ function llmConfig(): LlmConfig | null {
     apiKey,
     baseUrl,
     thinking: (process.env.WEBBOT_LLM_THINKING?.trim().toLowerCase() || "adaptive") !== "off",
+    // Apagada por defecto: la mayoria de modelos que se enchufan aqui son de solo texto y una
+    // imagen les devuelve un 400. Quien tenga uno con vision la enciende a mano.
+    vision: ["on", "true", "1"].includes(process.env.WEBBOT_LLM_VISION?.trim().toLowerCase() || "off"),
     timeoutMs: intFromEnv("WEBBOT_LLM_TIMEOUT_MS", 180_000),
   };
 }

@@ -31,6 +31,7 @@ function fakeProvider(turns: LlmTurn[]): LlmProvider & { inputs: LlmInput[]; abo
 
   return {
     label: "falso:modelo",
+    vision: false,
     start: () => conversation,
     inputs,
     get aborted() {
@@ -126,6 +127,39 @@ describe("agente del panel", () => {
 
     expect(origenes).toEqual(["panel"]);
   });
+  it("saca la captura del JSON y se la manda al modelo si puede verla", async () => {
+    const provider = fakeProvider([
+      turn({ stop: "tools", toolCalls: [{ id: "c1", name: "webbot_screenshot", input: { tabId: 7 } }] }),
+      turn({ text: "Veo un dialogo.", stop: "end" }),
+    ]);
+    (provider as { vision: boolean }).vision = true;
+    const { bridge, events } = fakeBridge(async () => ({ tabId: 7, dataUrl: "data:image/png;base64,QUJD" }));
+
+    createAgentRunner(bridge, provider).handle({ kind: "agent.start", runId: "r1", prompt: "mira la pagina" });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    const results = (provider.inputs[1] as Extract<LlmInput, { kind: "toolResults" }>).results;
+    expect(results[0]?.image).toEqual({ mediaType: "image/png", base64: "QUJD" });
+    // El data URL nunca va en el texto: son cientos de kilobytes que ademas no dicen nada.
+    expect(results[0]?.content).not.toContain("QUJD");
+    expect(results[0]?.content).toContain("[PNG adjunto]");
+  });
+
+  it("sin vision la captura no se manda, y se dice por que", async () => {
+    const provider = fakeProvider([
+      turn({ stop: "tools", toolCalls: [{ id: "c1", name: "webbot_screenshot", input: { tabId: 7 } }] }),
+      turn({ text: "No puedo verla.", stop: "end" }),
+    ]);
+    const { bridge, events } = fakeBridge(async () => ({ tabId: 7, dataUrl: "data:image/png;base64,QUJD" }));
+
+    createAgentRunner(bridge, provider).handle({ kind: "agent.start", runId: "r1", prompt: "mira la pagina" });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    const results = (provider.inputs[1] as Extract<LlmInput, { kind: "toolResults" }>).results;
+    expect(results[0]?.image).toBeUndefined();
+    expect(results[0]?.content).toContain("no ve imagenes");
+  });
+
   it("le pasa al modelo la pestana que la persona tiene delante", async () => {
     const provider = fakeProvider([turn({ text: "Va de dominios de ejemplo.", stop: "end" })]);
     const { bridge, events } = fakeBridge();
@@ -279,6 +313,7 @@ describe("agente del panel", () => {
     // unica salida seria el boton Detener.
     const mudo: LlmProvider = {
       label: "mudo:modelo",
+      vision: false,
       start: () => ({
         send: (_input, _handlers, signal) =>
           new Promise((_resolve, reject) => {
@@ -300,6 +335,7 @@ describe("agente del panel", () => {
   it("detener no se reporta como un plazo agotado", async () => {
     const mudo: LlmProvider = {
       label: "mudo:modelo",
+      vision: false,
       start: () => ({
         send: (_input, _handlers, signal) =>
           new Promise((_resolve, reject) => {

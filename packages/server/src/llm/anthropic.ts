@@ -20,6 +20,7 @@ export interface AnthropicOptions {
   model: string;
   /** El razonamiento adaptativo devuelve 400 en los Claude anteriores a la familia 4.6. */
   thinking: boolean;
+  vision: boolean;
   /** Solo para los tests: un cliente ya construido. */
   client?: Anthropic;
 }
@@ -47,6 +48,7 @@ export function createAnthropicProvider(options: AnthropicOptions): LlmProvider 
 
   return {
     label: `anthropic:${options.model}`,
+    vision: options.vision,
     start(system: string, tools: LlmTool[]): LlmConversation {
       const toolParams = tools.map((entry) => ({
         name: entry.name,
@@ -66,7 +68,21 @@ export function createAnthropicProvider(options: AnthropicOptions): LlmProvider 
               content: input.results.map((result) => ({
                 type: "tool_result" as const,
                 tool_use_id: result.id,
-                content: result.content,
+                // Anthropic admite bloques dentro del tool_result, asi que la captura viaja en su
+                // sitio, pegada al resultado que la produjo.
+                content: result.image
+                  ? [
+                      { type: "text" as const, text: result.content },
+                      {
+                        type: "image" as const,
+                        source: {
+                          type: "base64" as const,
+                          media_type: result.image.mediaType as "image/png",
+                          data: result.image.base64,
+                        },
+                      },
+                    ]
+                  : result.content,
                 is_error: !result.ok,
               })),
             });

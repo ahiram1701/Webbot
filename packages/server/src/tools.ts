@@ -127,7 +127,10 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
 
   tool({
     name: "webbot_screenshot",
-    description: "Captura la parte visible de la pestana activa como PNG en base64 (data URL).",
+    description:
+      "Captura la parte visible de la pestana como PNG. Sirve para ver la distribucion (que tapa que, donde " +
+      "esta algo) cuando webbot_outline no lo aclara; para leer texto es mejor webbot_extract. Trae la pestana " +
+      "al primer plano, asi que no la pidas por costumbre.",
     shape: { tabId },
     toCommand: ({ tabId: id }) => ({ type: "page.screenshot", tabId: id }),
   }),

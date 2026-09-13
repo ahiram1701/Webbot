@@ -283,7 +283,17 @@ confirmación. Publica de verdad y no se puede deshacer.
 
 **El orden es siempre `dryRun` → confirmar la cuenta → publicar.** Con `dryRun: true` rellena el
 cuadro de texto, localiza el botón y se detiene sin pulsarlo, devolviendo en `account` la cuenta con
-la que saldría el post. Para publicar de verdad hay que pasar esa cuenta en `expectedAccount`
+la que saldría el post y en `wrote` el texto que de verdad aceptó el editor.
+
+El ensayo **recoge lo que montó**: vacía el cuadro y cierra el diálogo que abrió (`tidied` dice si
+lo consiguió). No es cosmético — el ensayo no simula nada, escribe en el composer real, y dejarlo
+puesto significaba que encadenar dos ensayos abría el segundo encima del borrador del primero, y
+que cancelar desde el panel te dejaba una publicación a medio escribir que no habías pedido.
+
+**Lo que no sabe hacer:** compartir una publicación que ya existe, publicar dentro de un grupo o
+elegir audiencia. El agente tiene instrucciones de decirlo en vez de montarlo a mano con
+`webbot_click`, y no por pedantería: publicar a base de clics se salta la comprobación de cuenta y
+la tarjeta de confirmación del panel, o sea las dos cosas que impiden publicar algo sin permiso. Para publicar de verdad hay que pasar esa cuenta en `expectedAccount`
 (`@usuario` en X, nombre visible en Facebook): sin ella, o si no coincide, se aborta antes de
 escribir nada. Importa sobre todo en Facebook, donde la sesión puede estar actuando como una página
 en lugar de como tu perfil.

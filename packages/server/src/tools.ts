@@ -245,6 +245,14 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
 /** Para resolver por nombre lo que pide el modelo. */
 export const WEBBOT_TOOLS_BY_NAME = new Map(WEBBOT_TOOLS.map((entry) => [entry.name, entry]));
 
+/**
+ * Alcance de la publicacion, comun a los dos cerebros. Va aparte de CONDUCIR porque no habla de
+ * como moverse por la pagina sino de que esta y que no esta soportado, que es lo que evita que el
+ * agente se invente un camino a mano.
+ */
+const ALCANCE_PUBLICAR =
+  "webbot_post_social escribe en el muro o el perfil, y eso es TODO lo que sabe hacer: no comparte una publicacion que ya existe, no publica dentro de un grupo, no elige audiencia ni destinatarios. Si te piden algo de eso, dilo y para; no lo montes a mano con webbot_click por la interfaz. Publicar a base de clics se salta la comprobacion de con que cuenta se publica y, en el panel, la tarjeta con la que la persona aprueba: acabarias publicando sin que nadie te lo haya confirmado.";
+
 /** Como se conduce la pagina. Igual para los dos cerebros. */
 const CONDUCIR = [
   "Webbot conduce el Chrome del usuario a traves de una extension MV3: extrae texto, hace clic y escribe en paginas, y publica en Facebook/X.",
@@ -255,6 +263,7 @@ const CONDUCIR = [
   "webbot_outline es la herramienta clave antes de interactuar: devuelve roles, textos y un selector sugerido por elemento. No adivines selectores, miralos primero.",
   "Los targets aceptan css, xpath, text, role o name y se combinan como AND; usa 'index' para desempatar.",
   "webbot_extract aplica automaticamente un perfil por dominio si existe; el campo 'selectors' de la llamada lo sobrescribe.",
+  "NO DIGAS QUE HICISTE ALGO QUE NO HICISTE. No afirmes que publicaste, compartiste, enviaste o guardaste nada si no tienes en este mismo turno el resultado de la herramienta que lo prueba: webbot_post_social devuelve posted:true solo cuando publico de verdad, y con dryRun:true devuelve posted:false porque no publico nada. Si una herramienta fallo, si la persona cancelo, o si simplemente no llegaste a llamarla, dilo tal cual. Quedarte a medias y decirlo es una respuesta correcta; dar por hecho lo que no paso, no.",
   "Solo se puede actuar sobre dominios de la allowlist configurada en la extension; si un comando falla con domain_blocked, el usuario debe anadir el dominio en Opciones.",
 ];
 
@@ -275,7 +284,7 @@ const PUBLICAR_PANEL =
 /** `audience` decide como se pide permiso para publicar, que es lo unico que difiere. */
 export function webbotInstructions(audience: "mcp" | "panel"): string {
   const publicar = audience === "mcp" ? PUBLICAR_MCP : PUBLICAR_PANEL;
-  return [...CONDUCIR.slice(0, -1), publicar, CONDUCIR[CONDUCIR.length - 1]].join(" ");
+  return [...CONDUCIR.slice(0, -1), publicar, ALCANCE_PUBLICAR, CONDUCIR[CONDUCIR.length - 1]].join(" ");
 }
 
 /** Las que ve un agente externo por MCP. */

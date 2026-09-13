@@ -28,7 +28,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 10;
+export const RUNTIME_VERSION = 11;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -41,7 +41,7 @@ export const RUNTIME_VERSION = 10;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 10;
+  const RUNTIME_VERSION_INNER = 11;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -57,6 +57,7 @@ export function installWebbotRuntime(): void {
       postButtonNames: [/^postear$/i, /^publicar$/i, /^post$/i, /^tweet$/i, /^twittear$/i],
       // El enlace a "Perfil" de la barra lateral lleva el @usuario de la sesion activa.
       accountLink: '[data-testid="AppTabBar_Profile_Link"]',
+      closeNames: [/^cerrar$/i, /^close$/i],
     },
     facebook: {
       openComposerNames: [
@@ -74,6 +75,7 @@ export function installWebbotRuntime(): void {
       // "Publicar" vive en el dialogo de configuracion que viene despues.
       nextStepNames: [/^siguiente$/i, /^next$/i],
       backNames: [/^volver$/i, /^back$/i, /^atr[aá]s$/i],
+      closeNames: [/^cerrar$/i, /^close$/i],
       // El composer saluda a quien publica: "¿Qué estás pensando, Impulsa CV?". Si la sesion actua
       // como una pagina, ese nombre es el de la pagina y no el del perfil personal.
       accountInPrompt: [/pensando,\s*(.+?)\s*\?\s*$/i, /on your mind,\s*(.+?)\s*\?\s*$/i],
@@ -476,6 +478,41 @@ export function installWebbotRuntime(): void {
   }
 
   /** Raiz de un editor Lexical (el composer de Facebook), o null si el elemento no esta en uno. */
+  /**
+   * Vacia el composer y cierra su dialogo si lo tiene. El orden importa: con el cuadro ya vacio
+   * Facebook cierra sin preguntar si descartar el borrador, y asi no hay un segundo dialogo que
+   * atender.
+   */
+  async function closeComposer(composer: Element, closeNames: RegExp[]): Promise<void> {
+    await writeComposer(composer, "", 200);
+    const dialog = composer.closest('[role="dialog"]');
+    if (!dialog) return;
+    const close = buttonByName(closeNames, dialog);
+    if (!close) return;
+    dispatchClick(close);
+    await until(() => (dialog.isConnected ? null : true), 3_000);
+  }
+
+  /**
+   * Deshace lo que monto el ensayo. El dryRun no simula: abre el composer de verdad y escribe el
+   * texto de verdad, y en Facebook hasta puede haber avanzado a la pantalla de configuracion. Si
+   * no se recoge, la persona se queda un borrador abierto que no pidio y el siguiente intento
+   * empieza encima de esos restos, que es justo como se acaba con dos dialogos apilados.
+   *
+   * Es el mejor esfuerzo y nunca lanza: el ensayo ya tiene su respuesta, y fallar al recoger no
+   * puede convertir en error una comprobacion que salio bien. Lo que pasara se dice en 'tidied'.
+   */
+  async function tidyAfterDryRun(composer: Element, closeNames: RegExp[], advancedStep = false): Promise<boolean> {
+    try {
+      // Si se avanzo de pantalla el composer esta detras, y hay que volver para poder vaciarlo.
+      const target = advancedStep ? ((await facebookBackToComposer()) ?? composer) : composer;
+      await closeComposer(target, closeNames);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function lexicalRoot(el: Element): HTMLElement | null {
     const root = el.closest('[data-lexical-editor="true"]');
     return root instanceof HTMLElement ? root : null;
@@ -853,7 +890,9 @@ export function installWebbotRuntime(): void {
     }
 
     if (options.dryRun) {
-      return { network: "x", dryRun: true, posted: false, account, composer: describeElement(composer), button: describeElement(button), text };
+      const found = { composer: describeElement(composer), button: describeElement(button), wrote: rawText(composer) };
+      const tidied = await tidyAfterDryRun(composer, SOCIAL.x.closeNames);
+      return { network: "x", dryRun: true, posted: false, account, ...found, tidied, text };
     }
 
     checkDeadline(options);
@@ -1012,7 +1051,9 @@ export function installWebbotRuntime(): void {
     }
 
     if (options.dryRun) {
-      return { network: "facebook", dryRun: true, posted: false, account, accountAliases, advancedStep, composer: composerAtWrite, button: describeElement(button), text };
+      const found = { composer: composerAtWrite, button: describeElement(button), wrote: rawText(composer) };
+      const tidied = await tidyAfterDryRun(composer, SOCIAL.facebook.closeNames, advancedStep);
+      return { network: "facebook", dryRun: true, posted: false, account, accountAliases, advancedStep, ...found, tidied, text };
     }
 
     checkDeadline(options);

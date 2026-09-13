@@ -499,7 +499,7 @@ describe("waitFor", () => {
 });
 
 describe("postSocial", () => {
-  it("con dryRun rellena el composer de X pero no pulsa publicar", async () => {
+  it("con dryRun escribe y comprueba, pero no pulsa publicar ni deja el borrador puesto", async () => {
     document.body.innerHTML = `
       <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
       <div data-testid="tweetButtonInline" role="button">Postear</div>`;
@@ -509,14 +509,62 @@ describe("postSocial", () => {
     const result = (await api.postSocial({ network: "x", text: "hola mundo", dryRun: true })) as {
       posted: boolean;
       dryRun: boolean;
+      wrote: string;
     };
 
     expect(result.dryRun).toBe(true);
     expect(result.posted).toBe(false);
     expect(spy).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-testid="tweetTextarea_0"]')?.textContent).toBe("hola mundo");
+    // El ensayo escribio de verdad, y lo demuestra devolviendo lo que quedo en el editor...
+    expect(result.wrote).toBe("hola mundo");
+    // ...pero no deja el borrador montado: eso obligaba a la persona a recogerlo a mano.
+    expect(document.querySelector('[data-testid="tweetTextarea_0"]')?.textContent).toBe("");
   });
 
+  it("cierra el dialogo que abrio el ensayo, y lo vacia antes para que no pregunte si descartar", async () => {
+    // Encadenar dos ensayos dejaba dos borradores abiertos y el segundo intento empezaba encima
+    // de los restos del primero: asi es como se acababa con dialogos apilados.
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="publicar">Publicar</div>
+        <div role="button" aria-label="Cerrar">x</div>
+      </div>`;
+    const dialogo = document.querySelector('[role="dialog"]') as HTMLElement;
+    dialogo.querySelector('[aria-label="Cerrar"]')?.addEventListener("click", () => dialogo.remove());
+
+    const result = (await api.postSocial({ network: "facebook", text: "un chiste", dryRun: true })) as {
+      wrote: string;
+      tidied: boolean;
+    };
+
+    expect(result.wrote).toBe("un chiste");
+    expect(result.tidied).toBe(true);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("un ensayo que no puede recoger sigue dando su respuesta, solo que lo dice", async () => {
+    // Recoger es lo ultimo y lo menos importante: si falla, la comprobacion ya valio igual.
+    document.body.innerHTML = `
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+    const composer = document.querySelector('[data-testid="tweetTextarea_0"]') as HTMLElement;
+    // Un editor que se niega a vaciarse: writeComposer lanza y la recogida tiene que tragarselo.
+    composer.addEventListener("input", () => {
+      if (!composer.textContent) composer.textContent = "residuo";
+    });
+
+    const result = (await api.postSocial({ network: "x", text: "alfa", dryRun: true })) as {
+      posted: boolean;
+      wrote: string;
+      tidied: boolean;
+    };
+
+    expect(result.posted).toBe(false);
+    expect(result.wrote).toBe("alfa");
+    expect(result.tidied).toBe(false);
+  });
   it("sin dryRun pulsa el boton de publicar de X y confirma al vaciarse el composer", { timeout: 15_000 }, async () => {
     document.body.innerHTML = `
       <a data-testid="AppTabBar_Profile_Link" href="/ahiram1701">Perfil</a>
@@ -567,10 +615,13 @@ describe("postSocial", () => {
       composer.append(propio);
     });
 
-    const result = (await api.postSocial({ network: "x", text: "alfa", dryRun: true })) as { posted: boolean };
+    const result = (await api.postSocial({ network: "x", text: "alfa", dryRun: true })) as {
+      posted: boolean;
+      wrote: string;
+    };
 
     expect(result.posted).toBe(false);
-    expect(composer.textContent).toBe("alfa");
+    expect(result.wrote).toBe("alfa");
   });
 
   it("no publica si el composer acaba con un texto distinto del pedido", { timeout: 15_000 }, async () => {
@@ -737,10 +788,13 @@ describe("postSocial", () => {
     dialogo.append(el);
     dialogo.insertAdjacentHTML("beforeend", `<div role="button" data-testid="publicar">Publicar</div>`);
 
-    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as { posted: boolean };
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as {
+      posted: boolean;
+      wrote: string;
+    };
 
     expect(result.posted).toBe(false);
-    expect(el.textContent).toBe("hola");
+    expect(result.wrote).toBe("hola");
   });
 
   it("detecta la cuenta por la barra lateral cuando un borrador tapa el saludo", async () => {
@@ -829,10 +883,13 @@ describe("postSocial", () => {
       );
     });
 
-    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as { account: string };
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as {
+      account: string;
+      wrote: string;
+    };
 
     expect(result.account).toBe("Ahiram SG");
-    expect(document.querySelector('[role="dialog"] [role="textbox"]')?.textContent).toBe("hola");
+    expect(result.wrote).toBe("hola");
   });
 
   it("no pulsa nada si hay varios candidatos a abrir el composer", async () => {
@@ -918,12 +975,13 @@ describe("postSocial", () => {
     const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as {
       posted: boolean;
       button: { selector: string };
+      wrote: string;
     };
 
     expect(abrirFeed).not.toHaveBeenCalled();
     expect(result.posted).toBe(false);
     expect(result.button.selector).toBe('[data-testid="publicar"]');
-    expect(document.querySelector('[aria-label="Crear publicacion"] [role="textbox"]')?.textContent).toBe("hola");
+    expect(result.wrote).toBe("hola");
   });
 
   it("avisa si no encuentra el composer de Facebook", async () => {
@@ -947,9 +1005,10 @@ describe("postSocial", () => {
 
     const result = (await api.postSocial({ network: "facebook", text: "desde webbot", dryRun: true })) as {
       posted: boolean;
+      wrote: string;
     };
 
     expect(result.posted).toBe(false);
-    expect(document.querySelector('[role="dialog"] [role="textbox"]')?.textContent).toBe("desde webbot");
+    expect(result.wrote).toBe("desde webbot");
   });
 });

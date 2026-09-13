@@ -38,6 +38,7 @@ export const FlowStepSchema = z.discriminatedUnion("do", [
     text: z.string(),
     dryRun: z.boolean().optional(),
     expectedAccount: z.string().optional().describe("Obligatorio para publicar de verdad: cuenta con la que debe salir."),
+    groups: z.array(z.string()).optional().describe("Solo Facebook: grupos en los que compartir ademas del muro. Cada nombre selecciona como mucho uno."),
   }),
   z.object({ do: z.literal("wait"), ms: z.number().int().min(0).max(60_000) }),
 ]);

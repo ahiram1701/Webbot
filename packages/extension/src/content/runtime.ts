@@ -23,12 +23,14 @@ export interface WebbotApi {
     dryRun?: boolean;
     /** Obligatoria para publicar de verdad: si la cuenta activa no coincide, no se toca nada. */
     expectedAccount?: string;
+    /** Solo Facebook: grupos en los que compartir ademas del muro. */
+    groups?: string[];
     /** Date.now() a partir del cual nadie espera ya la respuesta: despues no se pulsa Publicar. */
     deadlineAt?: number;
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 11;
+export const RUNTIME_VERSION = 12;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -41,7 +43,7 @@ export const RUNTIME_VERSION = 11;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 11;
+  const RUNTIME_VERSION_INNER = 12;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -76,6 +78,12 @@ export function installWebbotRuntime(): void {
       nextStepNames: [/^siguiente$/i, /^next$/i],
       backNames: [/^volver$/i, /^back$/i, /^atr[aá]s$/i],
       closeNames: [/^cerrar$/i, /^close$/i],
+      // La opcion vive en la pantalla de configuracion y su nombre accesible arrastra el reclamo
+      // entero ("Compartir en grupos Llega a mas personas..."), asi que se ancla al principio.
+      shareToGroupsNames: [/^compartir en grupos/i, /^share (to|in) groups/i],
+      doneNames: [/^listo$/i, /^done$/i, /^hecho$/i],
+      // Controles del selector que NO son grupos, para no confundirlos con uno al elegir.
+      pickerNoise: [/^listo$/i, /^done$/i, /^hecho$/i, /^volver$/i, /^back$/i, /^atr[aá]s$/i, /^cerrar$/i, /^close$/i, /^buscar/i, /^search/i, /^eliminar/i, /^remove/i, /^quitar/i],
       // El composer saluda a quien publica: "¿Qué estás pensando, Impulsa CV?". Si la sesion actua
       // como una pagina, ese nombre es el de la pagina y no el del perfil personal.
       accountInPrompt: [/pensando,\s*(.+?)\s*\?\s*$/i, /on your mind,\s*(.+?)\s*\?\s*$/i],
@@ -728,7 +736,7 @@ export function installWebbotRuntime(): void {
   // Adaptadores de redes sociales
   // -------------------------------------------------------------------------
 
-  type PostOptions = { dryRun: boolean; expectedAccount?: string; deadlineAt?: number };
+  type PostOptions = { dryRun: boolean; expectedAccount?: string; deadlineAt?: number; groups?: string[] };
 
   /** Quita la arroba y normaliza, para que "@Ahiram1701" y "ahiram1701" sean la misma cuenta. */
   function accountKey(value: string): string {
@@ -858,6 +866,11 @@ export function installWebbotRuntime(): void {
   }
 
   async function postToX(text: string, options: PostOptions): Promise<Record<string, unknown>> {
+    if (options.groups?.length) {
+      throw Object.assign(new Error("X no tiene grupos: 'groups' solo vale para Facebook."), {
+        webbotCode: "bad_request",
+      });
+    }
     const account = xAccount();
     checkAccount(account, options);
 
@@ -953,6 +966,99 @@ export function installWebbotRuntime(): void {
     return until(() => firstMatching(SOCIAL.facebook.composer), 5_000);
   }
 
+  /** Lo que en el selector es un grupo y no un control. */
+  function groupCandidates(picker: Element): Element[] {
+    const vistos = new Set<string>();
+    const found: Element[] = [];
+    for (const el of Array.from(picker.querySelectorAll('[role="button"], button'))) {
+      if (!isVisible(el)) continue;
+      const name = accessibleName(el).trim();
+      if (!name || vistos.has(name)) continue;
+      if (SOCIAL.facebook.pickerNoise.some((pattern) => pattern.test(name))) continue;
+      vistos.add(name);
+      found.push(el);
+      if (found.length >= 40) break;
+    }
+    return found;
+  }
+
+  /**
+   * Elige grupos en la pantalla de configuracion y vuelve a ella. Cada nombre pedido selecciona
+   * COMO MUCHO UN grupo: 'memes' podria encajar con cinco, y publicar en cinco sitios porque una
+   * palabra era ambigua no es una sorpresa que se pueda deshacer. Los demas se devuelven en
+   * 'groupsAvailable' para que quien pida pueda nombrarlos uno a uno si los quiere.
+   */
+  async function selectFacebookGroups(wanted: string[]): Promise<Record<string, unknown>> {
+    const opener = buttonByName(SOCIAL.facebook.shareToGroupsNames);
+    if (!opener) {
+      throw Object.assign(
+        new Error(
+          "No aparece la opcion 'Compartir en grupos' en esta publicacion. Facebook no la ofrece siempre: " +
+            "depende del tipo de publicacion y de si tienes grupos donde puedas publicar.",
+        ),
+        { webbotCode: "element_not_found" },
+      );
+    }
+    dispatchClick(opener);
+
+    // El selector es el dialogo que trae el boton de confirmar; por titulo no vale, depende del idioma.
+    const picker = await until(
+      () =>
+        Array.from(document.querySelectorAll('[role="dialog"]')).find(
+          (dialog) => isVisible(dialog) && buttonByName(SOCIAL.facebook.doneNames, dialog) !== null,
+        ) ?? null,
+      8_000,
+    );
+    if (!picker) {
+      throw Object.assign(new Error("El selector de grupos de Facebook no llego a abrirse."), {
+        webbotCode: "element_not_found",
+      });
+    }
+
+    const candidates = groupCandidates(picker);
+    const groupsAvailable = candidates.map((el) => accessibleName(el).trim());
+    const groupsMatched: string[] = [];
+    const groupsMissing: string[] = [];
+
+    for (const needle of wanted) {
+      const aguja = norm(needle);
+      const hit = candidates.find((el) => {
+        const name = accessibleName(el).trim();
+        return !groupsMatched.includes(name) && norm(name).includes(aguja);
+      });
+      if (!hit) {
+        groupsMissing.push(needle);
+        continue;
+      }
+      dispatchClick(hit);
+      groupsMatched.push(accessibleName(hit).trim());
+      await sleep(350);
+    }
+
+    // Confirmar y volver a la pantalla donde vive Publicar, se haya elegido algo o no.
+    const done = buttonByName(SOCIAL.facebook.doneNames, picker);
+    if (done) {
+      dispatchClick(done);
+      await until(() => (picker.isConnected ? null : true), 5_000);
+    }
+
+    /**
+     * Pedir grupos y acabar publicando solo en el muro seria la peor de las salidas: se parece
+     * tanto a haber acertado que nadie lo mira. Mejor no publicar nada y decir que hay.
+     */
+    if (groupsMatched.length === 0) {
+      throw Object.assign(
+        new Error(
+          `Ninguno de los grupos pedidos (${wanted.join(", ")}) esta entre los que Facebook ofrece aqui: ` +
+            `${groupsAvailable.join(" | ") || "ninguno"}. No se ha publicado nada.`,
+        ),
+        { webbotCode: "element_not_found" },
+      );
+    }
+
+    return { groupsMatched, groupsMissing, groupsAvailable };
+  }
+
   async function postToFacebook(text: string, options: PostOptions): Promise<Record<string, unknown>> {
     let composer = firstMatching(SOCIAL.facebook.composer);
 
@@ -1023,19 +1129,23 @@ export function installWebbotRuntime(): void {
      * viene detras. Se avanza y se busca alli, recorriendo los dialogos abiertos porque el nuevo
      * no es el que contenia el composer.
      */
+    /** Publicar en cualquiera de los dialogos abiertos: tras avanzar ya no es el del composer. */
+    const findPublish = (timeoutMs: number): Promise<Element | null> =>
+      until(() => {
+        for (const dlg of Array.from(document.querySelectorAll('[role="dialog"]'))) {
+          const el = publishIn(dlg);
+          if (el) return el;
+        }
+        return null;
+      }, timeoutMs);
+
     let advancedStep = false;
     if (!button) {
       const next = buttonByName(SOCIAL.facebook.nextStepNames, scope);
       if (next) {
         dispatchClick(next);
         advancedStep = true;
-        button = await until(() => {
-          for (const dlg of Array.from(document.querySelectorAll('[role="dialog"]'))) {
-            const el = publishIn(dlg);
-            if (el) return el;
-          }
-          return null;
-        }, 8_000);
+        button = await findPublish(8_000);
       }
     }
 
@@ -1050,10 +1160,26 @@ export function installWebbotRuntime(): void {
       );
     }
 
+    /**
+     * Los grupos se eligen AQUI: la opcion vive en la misma pantalla que Publicar, y tiene que
+     * estar resuelta antes de pulsarlo. Elegir repinta el dialogo, asi que el boton se vuelve a
+     * buscar: el de antes ya no esta en el arbol.
+     */
+    let groups: Record<string, unknown> = {};
+    if (options.groups?.length) {
+      groups = await selectFacebookGroups(options.groups);
+      button = await findPublish(8_000);
+      if (!button) {
+        throw Object.assign(new Error("Tras elegir los grupos no volvio a aparecer un boton 'Publicar' habilitado."), {
+          webbotCode: "post_button_disabled",
+        });
+      }
+    }
+
     if (options.dryRun) {
       const found = { composer: composerAtWrite, button: describeElement(button), wrote: rawText(composer) };
       const tidied = await tidyAfterDryRun(composer, SOCIAL.facebook.closeNames, advancedStep);
-      return { network: "facebook", dryRun: true, posted: false, account, accountAliases, advancedStep, ...found, tidied, text };
+      return { network: "facebook", dryRun: true, posted: false, account, accountAliases, advancedStep, ...found, ...groups, tidied, text };
     }
 
     checkDeadline(options);
@@ -1066,7 +1192,7 @@ export function installWebbotRuntime(): void {
       return composer.isConnected && rawText(composer).length > 0 ? null : true;
     }, 15_000);
 
-    return { network: "facebook", dryRun: false, posted: true, confirmed: closed === true, account, accountAliases, url: location.href, text };
+    return { network: "facebook", dryRun: false, posted: true, confirmed: closed === true, account, accountAliases, ...groups, url: location.href, text };
   }
 
   // -------------------------------------------------------------------------
@@ -1219,7 +1345,7 @@ export function installWebbotRuntime(): void {
       return { found: describeElement(found), url: location.href };
     },
 
-    async postSocial({ network, text, dryRun, expectedAccount, deadlineAt }) {
+    async postSocial({ network, text, dryRun, expectedAccount, deadlineAt, groups }) {
       // Una pagina oculta tiene los temporizadores congelados: el flujo avanzaria a trompicones y
       // podria llegar a Publicar cuando ya nadie espera. Mejor no empezar.
       if (document.visibilityState === "hidden") {
@@ -1227,7 +1353,7 @@ export function installWebbotRuntime(): void {
           webbotCode: "tab_hidden",
         });
       }
-      const options: PostOptions = { dryRun: dryRun ?? false, expectedAccount, deadlineAt };
+      const options: PostOptions = { dryRun: dryRun ?? false, expectedAccount, deadlineAt, groups };
       return network === "x" ? postToX(text, options) : postToFacebook(text, options);
     },
   };

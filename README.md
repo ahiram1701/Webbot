@@ -200,7 +200,7 @@ Se añade el hostname exacto, no el dominio padre: permitir `gist.github.com` no
 | `webbot_links` | Enlaces con filtro por texto o por dominio propio. |
 | `webbot_screenshot` | Captura PNG de la parte visible. Le llega al modelo como imagen si tiene visión. |
 | `webbot_click` / `webbot_type` / `webbot_scroll` / `webbot_wait_for` | Interacción. |
-| `webbot_post_social` | Publica en Facebook o X. |
+| `webbot_post_social` | Publica en Facebook o X, y con `groups` comparte además en grupos. |
 | `webbot_flow_list` / `webbot_flow_run` | Flujos guardados. |
 
 El orden que funciona es siempre el mismo: `webbot_outline` para **ver** qué hay en la página y
@@ -290,10 +290,30 @@ lo consiguió). No es cosmético — el ensayo no simula nada, escribe en el com
 puesto significaba que encadenar dos ensayos abría el segundo encima del borrador del primero, y
 que cancelar desde el panel te dejaba una publicación a medio escribir que no habías pedido.
 
-**Lo que no sabe hacer:** compartir una publicación que ya existe, publicar dentro de un grupo o
-elegir audiencia. El agente tiene instrucciones de decirlo en vez de montarlo a mano con
-`webbot_click`, y no por pedantería: publicar a base de clics se salta la comprobación de cuenta y
-la tarjeta de confirmación del panel, o sea las dos cosas que impiden publicar algo sin permiso. Para publicar de verdad hay que pasar esa cuenta en `expectedAccount`
+### Compartir en grupos
+
+`groups` reparte la misma publicación en grupos de Facebook además de en tu muro. Va por el guion
+de siempre —`dryRun` → tarjeta → publicar— porque publicar en un grupo es igual de irreversible:
+
+```json
+{ "network": "facebook", "text": "…", "groups": ["Memes y más memes", "Mundo de memes"] }
+```
+
+**Cada nombre selecciona como mucho un grupo.** `"memes"` podría encajar con cinco, y publicar en
+cinco sitios porque una palabra era ambigua no se puede deshacer; para varios, pasa varios nombres.
+El `dryRun` devuelve en `groupsAvailable` todos los que Facebook ofrece ahí, así que el camino es
+ensayar, mirar la lista y volver a pedir por el nombre exacto.
+
+Si no encaja ninguno **no se publica nada**, ni siquiera en el muro: pedir grupos y acabar
+publicando solo en tu perfil se parece demasiado a haber acertado como para dejarlo pasar.
+
+La tarjeta del panel cambia de título a **«Publicar y compartir en grupos»** y los lista uno a uno.
+Aprobar «publicar en Facebook» sin saber que además sale en cinco grupos no es aprobarlo.
+
+**Lo que sigue sin saber hacer:** compartir una publicación que *ya existe* y elegir audiencia. El
+agente tiene instrucciones de decirlo en vez de montarlo a mano con `webbot_click`, y no por
+pedantería: publicar a base de clics se salta la comprobación de cuenta y la tarjeta de
+confirmación, o sea las dos cosas que impiden publicar algo sin permiso. Para publicar de verdad hay que pasar esa cuenta en `expectedAccount`
 (`@usuario` en X, nombre visible en Facebook): sin ella, o si no coincide, se aborta antes de
 escribir nada. Importa sobre todo en Facebook, donde la sesión puede estar actuando como una página
 en lugar de como tu perfil.

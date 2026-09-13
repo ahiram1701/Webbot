@@ -172,6 +172,7 @@ export function createAgentRunner(
         network: command.network,
         text: command.text,
         account: command.expectedAccount,
+        groups: command.groups,
       });
     });
 

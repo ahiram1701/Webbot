@@ -198,7 +198,8 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
       "PUBLICA DE VERDAD Y SIN CONFIRMACION: es una accion publica e irreversible sobre la cuenta real. " +
       "Pide permiso explicito al usuario antes de llamarla con dryRun:false. " +
       "Con dryRun:true rellena el composer, localiza el boton de publicar y se detiene sin pulsarlo, " +
-      "devolviendo en 'account' la cuenta activa: usalo siempre antes de publicar. " +
+      "devolviendo en 'account' la cuenta activa: usalo siempre antes de publicar. El ensayo recoge lo que " +
+      "monto, asi que no deja borradores abiertos. " +
       "Trae la pestana de la red al primer plano, porque en segundo plano Chrome congela la pagina.",
     shape: {
       network: NetworkSchema,
@@ -212,11 +213,22 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
           "Obligatorio con dryRun:false. Cuenta con la que debe salir el post, tal como la devolvio el dryRun en " +
             "'account': '@usuario' en X, nombre visible del perfil o pagina en Facebook. Si no coincide, se aborta.",
         ),
+      groups: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "SOLO FACEBOOK: grupos en los que compartir ademas del muro. Cada nombre selecciona COMO MUCHO UNO, " +
+            "porque una palabra ambigua no puede acabar publicando en cinco sitios; para varios, pasa varios " +
+            "nombres. El dryRun devuelve en 'groupsAvailable' los que Facebook ofrece: usa esos nombres tal cual, " +
+            "porque son los que se le ensenan a la persona en la tarjeta con la que aprueba. " +
+            "Si no encaja ninguno, no se publica nada.",
+        ),
     },
-    toCommand: ({ network, text, dryRun, expectedAccount }) => ({
+    toCommand: ({ network, text, dryRun, expectedAccount, groups }) => ({
       type: "social.post",
       network,
       text,
+      groups,
       dryRun,
       expectedAccount,
     }),

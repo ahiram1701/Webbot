@@ -278,7 +278,8 @@ function confirmCard(entry: TranscriptEntry & { kind: "confirm" }): HTMLElement 
   box.className = "confirm";
 
   const title = document.createElement("h2");
-  title.textContent = "Publicar de verdad";
+  // Compartir en grupos sale del muro: el titulo tiene que decirlo antes que nada.
+  title.textContent = entry.groups?.length ? "Publicar y compartir en grupos" : "Publicar de verdad";
   box.append(title);
 
   const list = document.createElement("dl");
@@ -286,6 +287,8 @@ function confirmCard(entry: TranscriptEntry & { kind: "confirm" }): HTMLElement 
     ["Red", entry.network === "x" ? "X" : "Facebook"],
     ["Cuenta", entry.account ?? "sin comprobar"],
   ];
+  // Aprobar "publicar en Facebook" sin saber que ademas sale en cinco grupos no es aprobarlo.
+  if (entry.groups?.length) rows.push(["Grupos", entry.groups.join(", ")]);
   for (const [label, value] of rows) {
     const dt = document.createElement("dt");
     dt.textContent = label;

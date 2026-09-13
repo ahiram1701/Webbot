@@ -142,6 +142,7 @@ async function runFlowStep(
         text: step.text,
         dryRun: step.dryRun,
         expectedAccount: step.expectedAccount,
+        groups: step.groups,
         deadlineAt: context.deadlineAt,
       });
     }
@@ -266,6 +267,7 @@ export async function runCommand(command: Command, context: CommandContext): Pro
         text: command.text,
         dryRun: command.dryRun ?? false,
         expectedAccount: command.expectedAccount,
+        groups: command.groups,
         deadlineAt: context.deadlineAt,
       });
     }

@@ -359,6 +359,120 @@ describe("observacion posterior a la accion", () => {
   });
 });
 
+describe("compartir en grupos de Facebook", () => {
+  /**
+   * La pantalla real: el composer acaba en "Siguiente" y la de configuracion trae "Publicar" y la
+   * opcion de grupos. El selector es otro dialogo con su boton de confirmar.
+   */
+  function facebookConGrupos(grupos: string[]): { elegidos: string[] } {
+    const elegidos: string[] = [];
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="siguiente">Siguiente</div>
+      </div>`;
+
+    document.querySelector('[data-testid="siguiente"]')?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div role="dialog" aria-label="Configuracion" data-testid="ajustes">
+           <div role="button" aria-label="Volver">volver</div>
+           <div role="button" data-testid="publicar">Publicar</div>
+           <div role="button" data-testid="abrir-grupos">Compartir en grupos Llega a mas personas</div>
+         </div>`,
+      );
+      document.querySelector('[data-testid="abrir-grupos"]')?.addEventListener("click", () => {
+        const picker = document.createElement("div");
+        picker.setAttribute("role", "dialog");
+        picker.setAttribute("data-testid", "picker");
+        picker.innerHTML =
+          `<div role="button" aria-label="Buscar">buscar</div>` +
+          grupos.map((nombre) => `<div role="button">${nombre}</div>`).join("") +
+          `<div role="button" aria-label="Listo">Listo</div>`;
+        document.body.append(picker);
+        for (const boton of Array.from(picker.querySelectorAll('[role="button"]'))) {
+          boton.addEventListener("click", () => {
+            const nombre = (boton.textContent ?? "").trim();
+            if (grupos.includes(nombre)) elegidos.push(nombre);
+            if (nombre === "Listo") picker.remove();
+          });
+        }
+      });
+    });
+    return { elegidos };
+  }
+
+  it("elige los grupos pedidos y vuelve a la pantalla donde vive Publicar", { timeout: 15_000 }, async () => {
+    const { elegidos } = facebookConGrupos(["Memes y mas memes", "Programadores", "Mundo de memes"]);
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "un chiste",
+      dryRun: true,
+      groups: ["Memes y mas memes", "Mundo de memes"],
+    })) as { groupsMatched: string[]; groupsMissing: string[]; button: { selector: string } };
+
+    expect(elegidos).toEqual(["Memes y mas memes", "Mundo de memes"]);
+    expect(result.groupsMatched).toEqual(["Memes y mas memes", "Mundo de memes"]);
+    expect(result.groupsMissing).toEqual([]);
+    // Elegir repinta el dialogo: si no se volviera a buscar, Publicar seria un nodo ya desechado.
+    expect(result.button.selector).toBe('[data-testid="publicar"]');
+  });
+
+  it("un nombre ambiguo elige UN grupo, no todos los que encajan", { timeout: 15_000 }, async () => {
+    // "memes" encaja con dos. Publicar en los dos porque la palabra era vaga no se puede deshacer.
+    const { elegidos } = facebookConGrupos(["Memes y mas memes", "Mundo de memes"]);
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "un chiste",
+      dryRun: true,
+      groups: ["memes"],
+    })) as { groupsMatched: string[]; groupsAvailable: string[] };
+
+    expect(elegidos).toEqual(["Memes y mas memes"]);
+    expect(result.groupsMatched).toEqual(["Memes y mas memes"]);
+    // El otro se devuelve para que se pueda pedir por su nombre si de verdad se quiere.
+    expect(result.groupsAvailable).toEqual(["Memes y mas memes", "Mundo de memes"]);
+  });
+
+  it("no publica en el muro a secas cuando no encaja ningun grupo pedido", async () => {
+    // Pedir grupos y acabar publicando solo en el muro se parece demasiado a haber acertado.
+    facebookConGrupos(["Programadores"]);
+
+    await expect(
+      api.postSocial({ network: "facebook", text: "un chiste", dryRun: true, groups: ["memes"] }),
+    ).rejects.toMatchObject({ webbotCode: "element_not_found" });
+  });
+
+  it("los controles del selector no se confunden con grupos", { timeout: 15_000 }, async () => {
+    const { elegidos } = facebookConGrupos(["Buscar algo curioso", "Memes"]);
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "un chiste",
+      dryRun: true,
+      groups: ["Memes"],
+    })) as { groupsAvailable: string[] };
+
+    // "Buscar" es un control y se descarta por nombre; el grupo que empieza igual tambien cae, que
+    // es el precio de no arriesgarse a pulsar la lupa creyendo que es un grupo.
+    expect(result.groupsAvailable).toEqual(["Memes"]);
+    expect(elegidos).toEqual(["Memes"]);
+  });
+
+  it("X no tiene grupos y lo dice en vez de ignorarlos", async () => {
+    document.body.innerHTML = `
+      <div data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+      <div data-testid="tweetButtonInline" role="button">Postear</div>`;
+
+    await expect(
+      api.postSocial({ network: "x", text: "hola", dryRun: true, groups: ["memes"] }),
+    ).rejects.toMatchObject({ webbotCode: "bad_request" });
+  });
+});
+
 describe("extract", () => {
   const PAGINA = `
     <nav>menu de navegacion</nav>

@@ -97,6 +97,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
     text: z.string().min(1),
     dryRun: z.boolean().optional(),
     expectedAccount: z.string().min(1).optional(),
+    groups: z.array(z.string()).optional().describe("Solo Facebook: grupos en los que compartir ademas del muro. Cada nombre selecciona como mucho uno."),
   }),
 
   z.object({ type: z.literal("flow.list") }),
@@ -184,6 +185,11 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
     network: NetworkSchema,
     text: z.string(),
     account: z.string().optional(),
+    /**
+     * Grupos en los que se compartira ademas del muro. Va en la tarjeta a proposito: aprobar
+     * "publicar en Facebook" sin saber que ademas sale en cinco grupos no es aprobarlo.
+     */
+    groups: z.array(z.string()).optional(),
   }),
   z.object({ type: z.literal("done"), steps: z.number().int() }),
   z.object({ type: z.literal("error"), message: z.string(), code: z.string().optional() }),

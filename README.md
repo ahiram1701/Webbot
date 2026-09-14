@@ -173,6 +173,13 @@ Publicar el panel se para y te enseña la red, la cuenta y el texto con dos boto
 pestañas, hacer clic, escribir en formularios— lo hace sin preguntar, y el límite real de dónde puede
 tocar sigue siendo la allowlist de Opciones.
 
+En Opciones hay una casilla **Publicar sin preguntar** que quita esa parada. Está apagada por
+defecto: es la última puerta antes de que algo salga en público y no se pueda deshacer. Con ella
+marcada el panel no se detiene, pero **la publicación sigue apareciendo en la conversación**, contada
+después en vez de preguntada antes, y la comprobación de con qué cuenta se publica se mantiene. El
+ajuste viaja con cada instrucción y no se guarda en el servidor: desmarcarlo surte efecto en el
+mensaje siguiente.
+
 El botón **Detener** corta el bucle en seco, y **Nueva** empieza una conversación desde cero. Cerrar
 el panel no cancela nada: el historial vive en el service worker y al reabrirlo está todo.
 
@@ -315,6 +322,9 @@ vuelve a pedir con los que se quieran, copiados tal cual.
 
 **Cada nombre selecciona como mucho un grupo.** `"memes"` podría encajar con cinco, y publicar en
 cinco sitios porque una palabra era ambigua no se puede deshacer; para varios, pasa varios nombres.
+
+**El tope son 9**, que es lo que admite Facebook por publicación. Pedir más no añade ninguno: los
+pierde. Webbot se para en 9 y devuelve el resto en `groupsSkipped` en vez de fingir que fueron.
 
 Si no encaja ninguno **no se publica nada**, ni siquiera en el muro: pedir grupos y acabar
 publicando solo en tu perfil se parece demasiado a haber acertado como para dejarlo pasar.

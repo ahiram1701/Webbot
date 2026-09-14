@@ -15,6 +15,11 @@ export interface WebbotSettings {
    * clave de API: esa se queda en el servidor, no en el almacenamiento del navegador.
    */
   llm: LlmChoice | null;
+  /**
+   * Publicar sin la tarjeta de confirmacion. Apagado por defecto y a proposito: es la ultima
+   * puerta antes de que algo salga en publico y no se pueda deshacer.
+   */
+  autoPublish: boolean;
 }
 
 export const DEFAULT_SETTINGS: WebbotSettings = {
@@ -24,6 +29,7 @@ export const DEFAULT_SETTINGS: WebbotSettings = {
   allowlist: ["x.com", "twitter.com", "facebook.com", "wikipedia.org", "github.com", "news.ycombinator.com", "example.com"],
   flows: {},
   llm: null,
+  autoPublish: false,
 };
 
 export async function getSettings(): Promise<WebbotSettings> {
@@ -35,6 +41,7 @@ export async function getSettings(): Promise<WebbotSettings> {
     allowlist: Array.isArray(stored.allowlist) ? (stored.allowlist as string[]) : DEFAULT_SETTINGS.allowlist,
     flows: (stored.flows as Record<string, Flow>) ?? {},
     llm: (stored.llm as LlmChoice | null) ?? null,
+    autoPublish: stored.autoPublish === true,
   };
 }
 

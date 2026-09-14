@@ -69,6 +69,8 @@ interface PendingConfirm {
 
 interface Run {
   conversation: LlmConversation;
+  /** La persona pidio que no se le pregunte. Se renueva en cada instruccion, no se recuerda. */
+  autoConfirm: boolean;
   controller: AbortController;
   busy: boolean;
   cancelled: boolean;
@@ -183,6 +185,21 @@ export function createAgentRunner(
       });
     });
 
+  /** Deja constancia en la conversacion de una publicacion que no paso por la tarjeta. */
+  const announceAuto = (runId: string, command: Command & { type: "social.post" | "social.share" }): void => {
+    const compartida = command.type === "social.share";
+    emit(runId, {
+      type: "confirm",
+      confirmId: `${runId}-auto-${Date.now()}`,
+      network: compartida ? "facebook" : command.network,
+      text: compartida ? (command.comment ?? "") : command.text,
+      account: command.expectedAccount,
+      groups: compartida ? undefined : command.groups,
+      sharing: compartida ? command.expectedPost : undefined,
+      auto: true,
+    });
+  };
+
   const runTool = async (
     runId: string,
     run: Run,
@@ -206,7 +223,9 @@ export function createAgentRunner(
 
     // Unica puerta manual: sacar algo en publico es irreversible, se escriba o se comparta.
     if ((command.type === "social.post" || command.type === "social.share") && command.dryRun !== true) {
-      const approved = await askConfirmation(runId, run, command);
+      // Sin preguntar se publica igual, pero la tarjeta sale despues contando lo que se publico:
+      // renunciar al permiso no es renunciar a enterarse.
+      const approved = run.autoConfirm ? (announceAuto(runId, command), true) : await askConfirmation(runId, run, command);
       if (!approved) {
         const detail = "La persona cancelo la publicacion desde el panel.";
         emit(runId, { type: "toolResult", callId: call.id, name: call.name, ok: false, summary: detail });
@@ -282,7 +301,7 @@ export function createAgentRunner(
     });
   };
 
-  const start = (runId: string, prompt: string, context?: PanelContext): void => {
+  const start = (runId: string, prompt: string, context?: PanelContext, autoConfirm = false): void => {
     if (!current) {
       emit(runId, {
         type: "error",
@@ -306,10 +325,12 @@ export function createAgentRunner(
       busy: false,
       cancelled: false,
       confirm: null,
+      autoConfirm: false,
     };
     run.controller = new AbortController();
     run.cancelled = false;
     run.busy = true;
+    run.autoConfirm = autoConfirm;
     runs.set(runId, run);
 
     void loop(runId, run, prompt, context)
@@ -340,7 +361,7 @@ export function createAgentRunner(
     handle(frame: AgentFrame): void {
       switch (frame.kind) {
         case "agent.start":
-          start(frame.runId, frame.prompt, frame.context);
+          start(frame.runId, frame.prompt, frame.context, frame.autoConfirm);
           return;
         case "agent.cancel":
           cancel(frame.runId);

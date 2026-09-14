@@ -17,6 +17,7 @@ export type TranscriptEntry =
       account?: string;
       groups?: string[];
       sharing?: string;
+      auto?: boolean;
       answered?: boolean;
       approved?: boolean;
     }
@@ -63,6 +64,10 @@ export function applyEvent(transcript: TranscriptEntry[], event: AgentEvent): Tr
         account: event.account,
         groups: event.groups,
         sharing: event.sharing,
+        auto: event.auto,
+        // Nace contestada: no hay nada que decidir, ya se publico.
+        answered: event.auto,
+        approved: event.auto,
       });
       return next;
     case "error":

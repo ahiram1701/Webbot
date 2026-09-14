@@ -223,7 +223,9 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
             "Despues vuelve a llamar con los que quieras de esa lista, copiados tal cual: son los que se le " +
             "ensenan a la persona en la tarjeta con la que aprueba. " +
             "Cada nombre selecciona COMO MUCHO UNO, porque una palabra ambigua no puede acabar publicando en " +
-            "cinco sitios; para varios, pasa varios nombres. Si pides grupos y no encaja ninguno, no se publica nada.",
+            "cinco sitios; para varios, pasa varios nombres. Facebook admite 9 por publicacion: si te piden " +
+            "compartir en todos los grupos que encajen, pasa nombres hasta llenar los 9, no unos pocos. Los que " +
+            "sobren se devuelven en 'groupsSkipped'. Si pides grupos y no encaja ninguno, no se publica nada.",
         ),
     },
     toCommand: ({ network, text, dryRun, expectedAccount, groups }) => ({

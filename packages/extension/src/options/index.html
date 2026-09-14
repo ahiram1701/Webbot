@@ -197,6 +197,18 @@
       </p>
     </fieldset>
     <fieldset>
+      <legend>Al publicar</legend>
+      <label class="check"><input id="autoPublish" type="checkbox" /> Publicar sin preguntar</label>
+      <p class="hint">
+        Normalmente el panel se detiene antes de publicar y te ensena la red, la cuenta, los grupos y el
+        texto, y tu decides con dos botones.
+        <span class="warn">Con esto marcado no se detiene: publica en cuanto el agente lo decida, y lo
+        publicado es publico y no se puede deshacer.</span>
+        La publicacion sigue apareciendo en la conversacion del panel, contada despues en vez de
+        preguntada antes, y la comprobacion de con que cuenta se publica se mantiene.
+      </p>
+    </fieldset>
+    <fieldset>
       <legend>Dominios permitidos</legend>
       <label for="allowlist">Un dominio por linea</label>
       <textarea id="allowlist" spellcheck="false"></textarea>

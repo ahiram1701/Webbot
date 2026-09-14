@@ -279,8 +279,10 @@ function confirmCard(entry: TranscriptEntry & { kind: "confirm" }): HTMLElement 
 
   const title = document.createElement("h2");
   // Compartir en grupos sale del muro: el titulo tiene que decirlo antes que nada.
-  title.textContent = entry.sharing
-    ? "Compartir una publicacion"
+  title.textContent = entry.auto
+    ? "Publicado sin preguntar"
+    : entry.sharing
+      ? "Compartir una publicacion"
     : entry.groups?.length
       ? "Publicar y compartir en grupos"
       : "Publicar de verdad";
@@ -315,7 +317,11 @@ function confirmCard(entry: TranscriptEntry & { kind: "confirm" }): HTMLElement 
   if (entry.answered) {
     const answered = document.createElement("p");
     answered.className = "answered";
-    answered.textContent = entry.approved ? "Publicado a peticion tuya." : "Cancelado: no se publico nada.";
+    answered.textContent = entry.auto
+      ? "Publicado sin preguntar, como pediste en Opciones."
+      : entry.approved
+        ? "Publicado a peticion tuya."
+        : "Cancelado: no se publico nada.";
     box.append(answered);
     return box;
   }

@@ -16,6 +16,7 @@ const providerInput = $<HTMLSelectElement>("provider");
 const modelInput = $<HTMLInputElement>("model");
 const baseUrlInput = $<HTMLInputElement>("baseUrl");
 const visionInput = $<HTMLInputElement>("vision");
+const autoPublishInput = $<HTMLInputElement>("autoPublish");
 const status = $("status");
 
 function say(message: string, isError = false): void {
@@ -34,6 +35,7 @@ async function load(): Promise<void> {
   modelInput.value = settings.llm?.model ?? "";
   baseUrlInput.value = settings.llm?.baseUrl ?? "";
   visionInput.checked = settings.llm?.vision ?? false;
+  autoPublishInput.checked = settings.autoPublish;
 }
 
 /**
@@ -105,7 +107,14 @@ $("save").addEventListener("click", async () => {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  await saveSettings({ token: tokenInput.value.trim(), bridgePort: port, allowlist, flows, llm });
+  await saveSettings({
+    token: tokenInput.value.trim(),
+    bridgePort: port,
+    allowlist,
+    flows,
+    llm,
+    autoPublish: autoPublishInput.checked,
+  });
   say("Guardado. La extension reconecta sola con los valores nuevos.");
 });
 

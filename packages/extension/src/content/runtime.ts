@@ -40,7 +40,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 13;
+export const RUNTIME_VERSION = 14;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -53,7 +53,7 @@ export const RUNTIME_VERSION = 13;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 13;
+  const RUNTIME_VERSION_INNER = 14;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -251,6 +251,8 @@ export function installWebbotRuntime(): void {
 
   /** Tope de elementos que se comparan antes y despues de actuar. */
   const SNAPSHOT_LIMIT = 300;
+  /** Lo que Facebook admite por publicacion. Pedir mas no anade ninguno, los pierde. */
+  const GROUPS_MAX = 9;
   /** Cuantos cambios se cuentan uno a uno antes de resumir el resto. */
   const DIFF_LIMIT = 15;
   const DIALOG_SELECTOR = '[aria-modal="true"], [role="dialog"], [role="alertdialog"], dialog[open]';
@@ -991,8 +993,21 @@ export function installWebbotRuntime(): void {
     return until(() => firstMatching(SOCIAL.facebook.composer), 5_000);
   }
 
+  /**
+   * El nombre del grupo sin la coletilla que Facebook le cuelga detras ("Programadores & Software
+   * Tu ultima visita fue el sabado"). Se quita porque es lo que se ensena en la tarjeta y porque
+   * obligaba a arrastrarla entera para que el nombre encajara.
+   */
+  function groupLabel(el: Element): string {
+    return accessibleName(el)
+      .trim()
+      .replace(/\s+tu\s+[uú]ltima\s+visita\b[\s\S]*$/i, "")
+      .replace(/\s+your\s+last\s+visit\b[\s\S]*$/i, "")
+      .trim();
+  }
+
   /** Lo que en el selector es un grupo y no un control. */
-  function groupCandidates(picker: Element): Element[] {
+  function groupCandidates(picker: ParentNode): Element[] {
     const vistos = new Set<string>();
     const found: Element[] = [];
     for (const el of Array.from(picker.querySelectorAll('[role="button"], button'))) {
@@ -1024,47 +1039,68 @@ export function installWebbotRuntime(): void {
         { webbotCode: "element_not_found" },
       );
     }
+    /**
+     * La lista sale DENTRO del mismo dialogo de configuracion: Facebook no abre otro. Esperar a que
+     * apareciera un dialogo nuevo dejaba esto colgado hasta agotar el plazo, y era justo por lo que
+     * el unico camino que funcionaba acababa siendo ir a mano, saltandose la tarjeta.
+     *
+     * Los grupos se reconocen por ser NUEVOS: lo que no estaba antes de pulsar es de la lista. Asi
+     * no hay que distinguir un grupo de un "Foto/video" por su nombre, que era la otra forma de
+     * fallar: la lista de disponibles venia llena de controles del editor.
+     */
+    const scope: ParentNode = opener.closest('[role="dialog"]') ?? document;
+    const antes = new Set(groupCandidates(scope).map((el) => accessibleName(el).trim()));
     dispatchClick(opener);
 
-    // El selector es el dialogo que trae el boton de confirmar; por titulo no vale, depende del idioma.
-    const picker = await until(
-      () =>
-        Array.from(document.querySelectorAll('[role="dialog"]')).find(
-          (dialog) => isVisible(dialog) && buttonByName(SOCIAL.facebook.doneNames, dialog) !== null,
-        ) ?? null,
-      8_000,
-    );
-    if (!picker) {
-      throw Object.assign(new Error("El selector de grupos de Facebook no llego a abrirse."), {
-        webbotCode: "element_not_found",
-      });
+    const nuevos = (): Element[] =>
+      groupCandidates(scope).filter((el) => !antes.has(accessibleName(el).trim()));
+    const candidates = await until(() => {
+      const found = nuevos();
+      return found.length > 0 ? found : null;
+    }, 8_000);
+    if (!candidates) {
+      throw Object.assign(
+        new Error(
+          "La lista de grupos no llego a aparecer tras pulsar 'Compartir en grupos'. Puede que esta " +
+            "publicacion no admita compartirse en grupos.",
+        ),
+        { webbotCode: "element_not_found" },
+      );
     }
 
-    const candidates = groupCandidates(picker);
-    const groupsAvailable = candidates.map((el) => accessibleName(el).trim());
+    const groupsAvailable = candidates.map(groupLabel);
     const groupsMatched: string[] = [];
     const groupsMissing: string[] = [];
+    /** Pedidos de mas: Facebook no los compartiria, asi que se dice en vez de fingir que si. */
+    const groupsSkipped: string[] = [];
 
     for (const needle of wanted) {
+      if (groupsMatched.length >= GROUPS_MAX) {
+        groupsSkipped.push(needle);
+        continue;
+      }
       const aguja = norm(needle);
       const hit = candidates.find((el) => {
-        const name = accessibleName(el).trim();
-        return !groupsMatched.includes(name) && norm(name).includes(aguja);
+        const label = groupLabel(el);
+        if (groupsMatched.includes(label)) return false;
+        // Se acepta tambien el nombre con coletilla: es lo que devolvian las versiones anteriores.
+        return norm(label).includes(aguja) || norm(accessibleName(el)).includes(aguja);
       });
       if (!hit) {
         groupsMissing.push(needle);
         continue;
       }
       dispatchClick(hit);
-      groupsMatched.push(accessibleName(hit).trim());
+      groupsMatched.push(groupLabel(hit));
       await sleep(350);
     }
 
-    // Confirmar y volver a la pantalla donde vive Publicar, se haya elegido algo o no.
-    const done = buttonByName(SOCIAL.facebook.doneNames, picker);
+    // Confirmar. El dialogo no se cierra —la lista vivia dentro—, asi que la senal es que la lista
+    // se vaya, no que desaparezca nada.
+    const done = buttonByName(SOCIAL.facebook.doneNames, scope);
     if (done) {
       dispatchClick(done);
-      await until(() => (picker.isConnected ? null : true), 5_000);
+      await until(() => (nuevos().length === 0 ? true : null), 5_000);
     }
 
     /**
@@ -1083,7 +1119,7 @@ export function installWebbotRuntime(): void {
       );
     }
 
-    return { groupsMatched, groupsMissing, groupsAvailable };
+    return { groupsMatched, groupsMissing, groupsSkipped, groupsAvailable, groupsLimit: GROUPS_MAX };
   }
 
   /** Como buttonByName pero tambien mira menus y enlaces: un destino no siempre es un boton. */

@@ -107,6 +107,57 @@ describe("agente del panel", () => {
     const result = events.find((event) => event.type === "toolResult");
     expect(result).toMatchObject({ ok: false, code: ErrorCodes.DOMAIN_BLOCKED });
   });
+  it("con autoConfirm publica sin tarjeta, pero deja constancia de lo que publico", async () => {
+    const provider = fakeProvider([
+      turn({
+        stop: "tools",
+        toolCalls: [
+          {
+            id: "c1",
+            name: "webbot_post_social",
+            input: { network: "facebook", text: "hola", expectedAccount: "Ahiram", groups: ["Programadores"] },
+          },
+        ],
+      }),
+      turn({ text: "Publicado.", stop: "end" }),
+    ]);
+    const { bridge, commands, events } = fakeBridge();
+
+    createAgentRunner(bridge, provider).handle({
+      kind: "agent.start",
+      runId: "r1",
+      prompt: "publica eso",
+      autoConfirm: true,
+    });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    // No se espera respuesta de nadie: el comando sale igual.
+    expect(commands.map((command) => command.type)).toEqual(["social.post"]);
+    // Pero la tarjeta sale igual, contando lo que paso: renunciar al permiso no es renunciar a verlo.
+    const aviso = events.find((event) => event.type === "confirm");
+    expect(aviso).toMatchObject({ auto: true, text: "hola", groups: ["Programadores"] });
+  });
+
+  it("sin autoConfirm no manda nada al navegador hasta que alguien conteste", async () => {
+    const provider = fakeProvider([
+      turn({
+        stop: "tools",
+        toolCalls: [
+          { id: "c1", name: "webbot_post_social", input: { network: "x", text: "hola", expectedAccount: "@yo" } },
+        ],
+      }),
+      turn({ text: "Listo.", stop: "end" }),
+    ]);
+    const { bridge, commands, events } = fakeBridge();
+
+    createAgentRunner(bridge, provider).handle({ kind: "agent.start", runId: "r1", prompt: "publica" });
+    await waitFor(() => events.some((event) => event.type === "confirm"), "confirm");
+
+    expect(commands).toEqual([]);
+    const aviso = events.find((event) => event.type === "confirm");
+    expect(aviso?.type).toBe("confirm");
+    expect((aviso as { auto?: boolean }).auto).toBeUndefined();
+  });
   it("identifica como 'panel' lo que pide, para no confundirlo con un agente externo", async () => {
     const provider = fakeProvider([
       turn({ stop: "tools", toolCalls: [{ id: "c1", name: "webbot_list_tabs", input: {} }] }),

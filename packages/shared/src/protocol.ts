@@ -208,6 +208,11 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
     groups: z.array(z.string()).optional(),
     /** Extracto de la publicacion ajena que se va a compartir, cuando se comparte una. */
     sharing: z.string().optional(),
+    /**
+     * Se publico sin preguntar. La tarjeta sale igual, pero contando lo que ya paso en vez de
+     * pidiendo permiso: sin esto no quedaria ni rastro en la conversacion de lo que se publico.
+     */
+    auto: z.boolean().optional(),
   }),
   z.object({ type: z.literal("done"), steps: z.number().int() }),
   z.object({ type: z.literal("error"), message: z.string(), code: z.string().optional() }),
@@ -277,6 +282,12 @@ export const FrameSchema = z.discriminatedUnion("kind", [
     runId: z.string(),
     prompt: z.string().min(1),
     context: PanelContextSchema.optional(),
+    /**
+     * La persona ha pedido en Opciones que no se le pregunte antes de publicar. Viaja con cada
+     * instruccion, no se guarda en el servidor: asi quitarlo tiene efecto en el mensaje siguiente
+     * y no queda un servidor recordando un permiso que ya se retiro.
+     */
+    autoConfirm: z.boolean().optional(),
   }),
   z.object({ kind: z.literal("agent.cancel"), runId: z.string() }),
   z.object({ kind: z.literal("agent.confirm"), runId: z.string(), confirmId: z.string(), approved: z.boolean() }),

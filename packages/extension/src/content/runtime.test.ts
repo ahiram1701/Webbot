@@ -361,8 +361,11 @@ describe("observacion posterior a la accion", () => {
 
 describe("compartir en grupos de Facebook", () => {
   /**
-   * La pantalla real: el composer acaba en "Siguiente" y la de configuracion trae "Publicar" y la
-   * opcion de grupos. El selector es otro dialogo con su boton de confirmar.
+   * La pantalla real, tal como se midio: el composer acaba en "Siguiente", la de configuracion trae
+   * "Publicar" y la opcion de grupos, y al pulsarla la lista de grupos aparece DENTRO de ese mismo
+   * dialogo, mezclada con los controles del editor. No se abre ningun dialogo nuevo.
+   *
+   * Los nombres llegan con la coletilla de Facebook pegada detras, que es como los devuelve.
    */
   function facebookConGrupos(grupos: string[]): { elegidos: string[] } {
     const elegidos: string[] = [];
@@ -378,26 +381,31 @@ describe("compartir en grupos de Facebook", () => {
         "beforeend",
         `<div role="dialog" aria-label="Configuracion" data-testid="ajustes">
            <div role="button" aria-label="Volver">volver</div>
+           <div role="button" aria-label="Foto/video">foto</div>
+           <div role="button" aria-label="Emoji">emoji</div>
+           <div role="button" aria-label="Etiquetar personas">etiquetar</div>
            <div role="button" data-testid="publicar">Publicar</div>
-           <div role="button" data-testid="abrir-grupos">Compartir en grupos Llega a mas personas</div>
+           <div role="button" data-testid="abrir-grupos">Compartir en grupos Llega a mas personas cuando compartes tu publicacion en grupos relevantes.</div>
          </div>`,
       );
+      const ajustes = document.querySelector('[data-testid="ajustes"]') as HTMLElement;
       document.querySelector('[data-testid="abrir-grupos"]')?.addEventListener("click", () => {
-        const picker = document.createElement("div");
-        picker.setAttribute("role", "dialog");
-        picker.setAttribute("data-testid", "picker");
-        picker.innerHTML =
-          `<div role="button" aria-label="Buscar">buscar</div>` +
-          grupos.map((nombre) => `<div role="button">${nombre}</div>`).join("") +
-          `<div role="button" aria-label="Listo">Listo</div>`;
-        document.body.append(picker);
-        for (const boton of Array.from(picker.querySelectorAll('[role="button"]'))) {
+        ajustes.insertAdjacentHTML(
+          "beforeend",
+          `<div data-testid="lista">${grupos
+            .map((nombre) => `<div role="button">${nombre} Tu ultima visita fue hace aproximadamente un mes</div>`)
+            .join("")}</div>
+           <div role="button" aria-label="Listo" data-testid="listo">Listo</div>`,
+        );
+        for (const boton of Array.from(ajustes.querySelectorAll('[data-testid="lista"] [role="button"]'))) {
           boton.addEventListener("click", () => {
-            const nombre = (boton.textContent ?? "").trim();
-            if (grupos.includes(nombre)) elegidos.push(nombre);
-            if (nombre === "Listo") picker.remove();
+            elegidos.push((boton.textContent ?? "").replace(/ Tu ultima visita.*$/, "").trim());
           });
         }
+        ajustes.querySelector('[data-testid="listo"]')?.addEventListener("click", () => {
+          ajustes.querySelector('[data-testid="lista"]')?.remove();
+          ajustes.querySelector('[data-testid="listo"]')?.remove();
+        });
       });
     });
     return { elegidos };
@@ -414,6 +422,7 @@ describe("compartir en grupos de Facebook", () => {
     })) as { groupsMatched: string[]; groupsMissing: string[]; button: { selector: string } };
 
     expect(elegidos).toEqual(["Memes y mas memes", "Mundo de memes"]);
+    // Sin la coletilla: es lo que se ensena en la tarjeta y lo que hay que poder copiar y pegar.
     expect(result.groupsMatched).toEqual(["Memes y mas memes", "Mundo de memes"]);
     expect(result.groupsMissing).toEqual([]);
     // Elegir repinta el dialogo: si no se volviera a buscar, Publicar seria un nodo ya desechado.
@@ -453,6 +462,24 @@ describe("compartir en grupos de Facebook", () => {
     expect(result.groupsMatched).toEqual(["Memes y mas memes"]);
     // El otro se devuelve para que se pueda pedir por su nombre si de verdad se quiere.
     expect(result.groupsAvailable).toEqual(["Memes y mas memes", "Mundo de memes"]);
+  });
+
+  it("se para en 9, que es lo que admite Facebook, y dice cuales se quedaron fuera", { timeout: 20_000 }, async () => {
+    const todos = Array.from({ length: 12 }, (_, i) => `Grupo ${i + 1}`);
+    const { elegidos } = facebookConGrupos(todos);
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "un chiste",
+      dryRun: true,
+      groups: todos,
+    })) as { groupsMatched: string[]; groupsSkipped: string[]; groupsLimit: number };
+
+    // Pedir doce no comparte en doce: Facebook se queda con nueve y pierde el resto sin avisar.
+    expect(result.groupsLimit).toBe(9);
+    expect(result.groupsMatched).toHaveLength(9);
+    expect(elegidos).toHaveLength(9);
+    expect(result.groupsSkipped).toEqual(["Grupo 10", "Grupo 11", "Grupo 12"]);
   });
 
   it("no publica en el muro a secas cuando no encaja ningun grupo pedido", async () => {

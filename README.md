@@ -321,10 +321,21 @@ Abre el selector, no elige nada y devuelve en `groupsAvailable` los nombres exac
 vuelve a pedir con los que se quieran, copiados tal cual.
 
 **Cada nombre selecciona como mucho un grupo.** `"memes"` podría encajar con cinco, y publicar en
-cinco sitios porque una palabra era ambigua no se puede deshacer; para varios, pasa varios nombres.
+cinco sitios porque una palabra era ambigua no se puede deshacer.
+
+**Para «todos mis grupos de X», `groupsMatchAll`:**
+
+```json
+{ "network": "facebook", "text": "…", "groups": ["software"], "groupsMatchAll": true }
+```
+
+Cada nombre se lleva entonces todos los que encajen, hasta el tope. Es lo que hay que usar cuando
+piden llegar al límite: enumerar nueve nombres a mano depende de que el agente los acierte todos, y
+en la práctica se quedaba corto.
 
 **El tope son 9**, que es lo que admite Facebook por publicación. Pedir más no añade ninguno: los
-pierde. Webbot se para en 9 y devuelve el resto en `groupsSkipped` en vez de fingir que fueron.
+pierde. Lo que encajaba y se quedó fuera —por el tope o por ir de uno en uno— vuelve en
+`groupsSkipped`: si esa lista no está vacía, no se compartió en todos los que encajaban.
 
 Si no encaja ninguno **no se publica nada**, ni siquiera en el muro: pedir grupos y acabar
 publicando solo en tu perfil se parece demasiado a haber acertado como para dejarlo pasar.

@@ -465,7 +465,8 @@ describe("compartir en grupos de Facebook", () => {
   });
 
   it("se para en 9, que es lo que admite Facebook, y dice cuales se quedaron fuera", { timeout: 20_000 }, async () => {
-    const todos = Array.from({ length: 12 }, (_, i) => `Grupo ${i + 1}`);
+    const letras = "ABCDEFGHIJKL".split("");
+    const todos = letras.map((letra) => `Nicho ${letra}`);
     const { elegidos } = facebookConGrupos(todos);
 
     const result = (await api.postSocial({
@@ -479,7 +480,56 @@ describe("compartir en grupos de Facebook", () => {
     expect(result.groupsLimit).toBe(9);
     expect(result.groupsMatched).toHaveLength(9);
     expect(elegidos).toHaveLength(9);
-    expect(result.groupsSkipped).toEqual(["Grupo 10", "Grupo 11", "Grupo 12"]);
+    expect(result.groupsSkipped).toEqual(["Nicho J", "Nicho K", "Nicho L"]);
+  });
+
+  it("con matchAll un solo nombre llena hasta el tope", { timeout: 20_000 }, async () => {
+    // Es lo que fallaba en la practica: pedir "todos mis grupos de software" dependia de que el
+    // modelo acertara a enumerar nueve nombres, y se quedaba en cinco. Con matchAll no enumera.
+    const { elegidos } = facebookConGrupos([
+      "Programadores & Software",
+      "Comunidad de Programadores",
+      "Desarrolladores de Software",
+      "Ingenieros en software",
+      "Diseño Web & Desarrollo de Software",
+      "Software libre MX",
+      "Software y algo mas",
+      "Arquitectura de Software",
+      "Testing de Software",
+      "Software para todos",
+      "Memes y mas memes",
+      "Noticias de Software",
+    ]);
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "un post",
+      dryRun: true,
+      groups: ["software"],
+      groupsMatchAll: true,
+    })) as { groupsMatched: string[]; groupsSkipped: string[] };
+
+    expect(result.groupsMatched).toHaveLength(9);
+    expect(elegidos).toHaveLength(9);
+    // El que sobraba se dice, para que se sepa que quedo fuera y no se de por completo.
+    expect(result.groupsSkipped).toEqual(["Noticias de Software"]);
+    // Y lo que no era del tema no entra aunque quede hueco.
+    expect(result.groupsMatched).not.toContain("Memes y mas memes");
+  });
+
+  it("sin matchAll el segundo que encaja se dice, en vez de perderse en silencio", { timeout: 15_000 }, async () => {
+    facebookConGrupos(["Memes y mas memes", "Mundo de memes", "Programadores"]);
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "un post",
+      dryRun: true,
+      groups: ["memes"],
+    })) as { groupsMatched: string[]; groupsSkipped: string[] };
+
+    expect(result.groupsMatched).toEqual(["Memes y mas memes"]);
+    // Saber que habia otro es lo que permite volver a pedirlo; antes no se enteraba nadie.
+    expect(result.groupsSkipped).toEqual(["Mundo de memes"]);
   });
 
   it("no publica en el muro a secas cuando no encaja ningun grupo pedido", async () => {

@@ -204,6 +204,14 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
     shape: {
       network: NetworkSchema,
       text: z.string().min(1).describe("Texto del post. En X el limite practico son 280 caracteres."),
+      groupsMatchAll: z
+        .boolean()
+        .optional()
+        .describe(
+          "Cada nombre de 'groups' se lleva TODOS los grupos que encajen en vez de solo el primero, hasta el " +
+            "tope de 9 de Facebook. Es lo que hay que usar cuando piden 'comparte en todos mis grupos de X': " +
+            "una sola llamada con groupsMatchAll:true llega al tope, y enumerar nombres a mano se queda corto.",
+        ),
       dryRun: z.boolean().optional().describe("true = simula sin pulsar Publicar. Por defecto false."),
       expectedAccount: z
         .string()
@@ -223,16 +231,18 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
             "Despues vuelve a llamar con los que quieras de esa lista, copiados tal cual: son los que se le " +
             "ensenan a la persona en la tarjeta con la que aprueba. " +
             "Cada nombre selecciona COMO MUCHO UNO, porque una palabra ambigua no puede acabar publicando en " +
-            "cinco sitios; para varios, pasa varios nombres. Facebook admite 9 por publicacion: si te piden " +
-            "compartir en todos los grupos que encajen, pasa nombres hasta llenar los 9, no unos pocos. Los que " +
-            "sobren se devuelven en 'groupsSkipped'. Si pides grupos y no encaja ninguno, no se publica nada.",
+            "cinco sitios sin haberlo pedido. Si te piden compartir en TODOS los grupos de un tema, no intentes " +
+            "enumerarlos: pasa las palabras del tema y pon groupsMatchAll:true. Lo que encajaba y se quedo fuera " +
+            "vuelve en 'groupsSkipped'; si esa lista no esta vacia, no has compartido en todos los que te pedian. " +
+            "Si pides grupos y no encaja ninguno, no se publica nada.",
         ),
     },
-    toCommand: ({ network, text, dryRun, expectedAccount, groups }) => ({
+    toCommand: ({ network, text, dryRun, expectedAccount, groups, groupsMatchAll }) => ({
       type: "social.post",
       network,
       text,
       groups,
+      groupsMatchAll,
       dryRun,
       expectedAccount,
     }),

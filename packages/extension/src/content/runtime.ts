@@ -35,12 +35,14 @@ export interface WebbotApi {
     expectedAccount?: string;
     /** Solo Facebook: grupos en los que compartir ademas del muro. */
     groups?: string[];
+    /** Cada nombre se lleva TODOS los grupos que encajen, no solo el primero. */
+    groupsMatchAll?: boolean;
     /** Date.now() a partir del cual nadie espera ya la respuesta: despues no se pulsa Publicar. */
     deadlineAt?: number;
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 15;
+export const RUNTIME_VERSION = 16;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -53,7 +55,7 @@ export const RUNTIME_VERSION = 15;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 15;
+  const RUNTIME_VERSION_INNER = 16;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -763,7 +765,13 @@ export function installWebbotRuntime(): void {
   // Adaptadores de redes sociales
   // -------------------------------------------------------------------------
 
-  type PostOptions = { dryRun: boolean; expectedAccount?: string; deadlineAt?: number; groups?: string[] };
+  type PostOptions = {
+    dryRun: boolean;
+    expectedAccount?: string;
+    deadlineAt?: number;
+    groups?: string[];
+    groupsMatchAll?: boolean;
+  };
 
   /** Quita la arroba y normaliza, para que "@Ahiram1701" y "ahiram1701" sean la misma cuenta. */
   function accountKey(value: string): string {
@@ -1034,7 +1042,7 @@ export function installWebbotRuntime(): void {
    * palabra era ambigua no es una sorpresa que se pueda deshacer. Los demas se devuelven en
    * 'groupsAvailable' para que quien pida pueda nombrarlos uno a uno si los quiere.
    */
-  async function selectFacebookGroups(wanted: string[]): Promise<Record<string, unknown>> {
+  async function selectFacebookGroups(wanted: string[], matchAll = false): Promise<Record<string, unknown>> {
     const opener = buttonByName(SOCIAL.facebook.shareToGroupsNames);
     if (!opener) {
       throw Object.assign(
@@ -1077,28 +1085,46 @@ export function installWebbotRuntime(): void {
     const groupsAvailable = candidates.map(groupLabel);
     const groupsMatched: string[] = [];
     const groupsMissing: string[] = [];
-    /** Pedidos de mas: Facebook no los compartiria, asi que se dice en vez de fingir que si. */
+    /** Encajaban y se quedaron fuera, por el tope o por ser el segundo que encaja con un nombre. */
     const groupsSkipped: string[] = [];
 
+    const anotarDescartado = (label: string): void => {
+      if (!groupsMatched.includes(label) && !groupsSkipped.includes(label)) groupsSkipped.push(label);
+    };
+
+    const encaja = (el: Element, aguja: string): boolean => {
+      const label = groupLabel(el);
+      if (groupsMatched.includes(label)) return false;
+      // Se acepta tambien el nombre con coletilla: es lo que devolvian las versiones anteriores.
+      return norm(label).includes(aguja) || norm(accessibleName(el)).includes(aguja);
+    };
+
     for (const needle of wanted) {
-      if (groupsMatched.length >= GROUPS_MAX) {
-        groupsSkipped.push(needle);
-        continue;
-      }
-      const aguja = norm(needle);
-      const hit = candidates.find((el) => {
-        const label = groupLabel(el);
-        if (groupsMatched.includes(label)) return false;
-        // Se acepta tambien el nombre con coletilla: es lo que devolvian las versiones anteriores.
-        return norm(label).includes(aguja) || norm(accessibleName(el)).includes(aguja);
-      });
-      if (!hit) {
+      const hits = candidates.filter((el) => encaja(el, norm(needle)));
+      if (hits.length === 0) {
         groupsMissing.push(needle);
         continue;
       }
-      dispatchClick(hit);
-      groupsMatched.push(groupLabel(hit));
-      await sleep(350);
+      /**
+       * Sin matchAll un nombre se lleva UNO: "memes" podria encajar con cinco, y publicar en cinco
+       * sitios porque una palabra era ambigua no se puede deshacer. Con matchAll se ha pedido justo
+       * lo contrario —todos los que encajen— asi que se llenan hasta el tope.
+       */
+      for (const hit of matchAll ? hits : hits.slice(0, 1)) {
+        const label = groupLabel(hit);
+        if (groupsMatched.includes(label)) continue;
+        if (groupsMatched.length >= GROUPS_MAX) {
+          anotarDescartado(label);
+          continue;
+        }
+        dispatchClick(hit);
+        groupsMatched.push(label);
+        await sleep(350);
+      }
+      // Los que encajaban y no se cogieron por ir de uno en uno: se dicen para poder pedirlos.
+      if (!matchAll) {
+        for (const resto of hits.slice(1)) anotarDescartado(groupLabel(resto));
+      }
     }
 
     // Confirmar. El dialogo no se cierra —la lista vivia dentro—, asi que la senal es que la lista
@@ -1403,7 +1429,7 @@ export function installWebbotRuntime(): void {
     // Con la lista vacia se abre el selector, se mira que hay y no se elige nada: es la unica
     // forma de enterarse de los nombres, y antes hacia falta acertar uno para que te los dijeran.
     if (options.groups) {
-      groups = await selectFacebookGroups(options.groups);
+      groups = await selectFacebookGroups(options.groups, options.groupsMatchAll ?? false);
       button = await findPublish(8_000);
       if (!button) {
         throw Object.assign(new Error("Tras elegir los grupos no volvio a aparecer un boton 'Publicar' habilitado."), {
@@ -1590,7 +1616,7 @@ export function installWebbotRuntime(): void {
       return sharePost(target, comment ?? "", { dryRun: dryRun ?? false, expectedAccount, expectedPost, deadlineAt });
     },
 
-    async postSocial({ network, text, dryRun, expectedAccount, deadlineAt, groups }) {
+    async postSocial({ network, text, dryRun, expectedAccount, deadlineAt, groups, groupsMatchAll }) {
       // Una pagina oculta tiene los temporizadores congelados: el flujo avanzaria a trompicones y
       // podria llegar a Publicar cuando ya nadie espera. Mejor no empezar.
       if (document.visibilityState === "hidden") {
@@ -1598,7 +1624,7 @@ export function installWebbotRuntime(): void {
           webbotCode: "tab_hidden",
         });
       }
-      const options: PostOptions = { dryRun: dryRun ?? false, expectedAccount, deadlineAt, groups };
+      const options: PostOptions = { dryRun: dryRun ?? false, expectedAccount, deadlineAt, groups, groupsMatchAll };
       return network === "x" ? postToX(text, options) : postToFacebook(text, options);
     },
   };

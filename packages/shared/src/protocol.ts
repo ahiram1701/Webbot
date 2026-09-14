@@ -97,7 +97,8 @@ export const CommandSchema = z.discriminatedUnion("type", [
     text: z.string().min(1),
     dryRun: z.boolean().optional(),
     expectedAccount: z.string().min(1).optional(),
-    groups: z.array(z.string()).optional().describe("Solo Facebook: grupos en los que compartir ademas del muro. Cada nombre selecciona como mucho uno."),
+    groups: z.array(z.string()).optional().describe("Solo Facebook: grupos en los que compartir ademas del muro."),
+    groupsMatchAll: z.boolean().optional().describe("Cada nombre se lleva todos los grupos que encajen, hasta el tope."),
   }),
 
   /** Compartir una publicacion que ya existe. Solo Facebook; X no tiene nada equivalente. */

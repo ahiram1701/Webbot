@@ -304,6 +304,7 @@ export async function runCommand(command: Command, context: CommandContext): Pro
         dryRun: command.dryRun ?? false,
         expectedAccount: command.expectedAccount,
         groups: command.groups,
+        groupsMatchAll: command.groupsMatchAll,
         deadlineAt: context.deadlineAt,
       });
     }

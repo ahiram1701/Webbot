@@ -45,6 +45,20 @@ async function focusTab(tabId: number): Promise<void> {
   await sleep(300);
 }
 
+/**
+ * Publicar en el muro se hace DESDE el muro. Una pestana parada en /groups/ o /marketplace/ es de
+ * Facebook igual, pero tiene su propio cuadro de texto, y escribir ahi creyendo que es el del muro
+ * publicaria en otro sitio. Se reconoce el muro por su ruta, que es lo unico estable.
+ */
+function esMuroDeFacebook(url: string): boolean {
+  try {
+    const { pathname } = new URL(url);
+    return pathname === "/" || pathname === "/home.php";
+  } catch {
+    return false;
+  }
+}
+
 /** Busca una pestana ya abierta en la red social; si no hay, abre una. */
 async function tabForNetwork(network: "x" | "facebook", allowlist: string[]): Promise<number> {
   const { hosts, url } = SOCIAL_HOME[network];
@@ -62,6 +76,11 @@ async function tabForNetwork(network: "x" | "facebook", allowlist: string[]): Pr
   if (existing?.id !== undefined) {
     assertAllowed(existing.url ?? "", allowlist);
     await waitForTabComplete(existing.id);
+    if (network === "facebook" && !esMuroDeFacebook(existing.url ?? "")) {
+      await chrome.tabs.update(existing.id, { url });
+      await waitForTabComplete(existing.id);
+      await sleep(2_500);
+    }
     return existing.id;
   }
 

@@ -217,11 +217,13 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
         .array(z.string())
         .optional()
         .describe(
-          "SOLO FACEBOOK: grupos en los que compartir ademas del muro. Cada nombre selecciona COMO MUCHO UNO, " +
-            "porque una palabra ambigua no puede acabar publicando en cinco sitios; para varios, pasa varios " +
-            "nombres. El dryRun devuelve en 'groupsAvailable' los que Facebook ofrece: usa esos nombres tal cual, " +
-            "porque son los que se le ensenan a la persona en la tarjeta con la que aprueba. " +
-            "Si no encaja ninguno, no se publica nada.",
+          "SOLO FACEBOOK: grupos en los que compartir ademas del muro. " +
+            "PARA SABER QUE GRUPOS HAY: llama con dryRun:true y groups:[] (lista vacia). Abre el selector, no " +
+            "elige nada y devuelve en 'groupsAvailable' los nombres exactos que ofrece Facebook. " +
+            "Despues vuelve a llamar con los que quieras de esa lista, copiados tal cual: son los que se le " +
+            "ensenan a la persona en la tarjeta con la que aprueba. " +
+            "Cada nombre selecciona COMO MUCHO UNO, porque una palabra ambigua no puede acabar publicando en " +
+            "cinco sitios; para varios, pasa varios nombres. Si pides grupos y no encaja ninguno, no se publica nada.",
         ),
     },
     toCommand: ({ network, text, dryRun, expectedAccount, groups }) => ({

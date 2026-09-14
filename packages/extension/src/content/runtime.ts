@@ -1070,8 +1070,10 @@ export function installWebbotRuntime(): void {
     /**
      * Pedir grupos y acabar publicando solo en el muro seria la peor de las salidas: se parece
      * tanto a haber acertado que nadie lo mira. Mejor no publicar nada y decir que hay.
+     *
+     * No aplica cuando no se pidio ninguno: ahi se venia justo a leer la lista.
      */
-    if (groupsMatched.length === 0) {
+    if (wanted.length > 0 && groupsMatched.length === 0) {
       throw Object.assign(
         new Error(
           `Ninguno de los grupos pedidos (${wanted.join(", ")}) esta entre los que Facebook ofrece aqui: ` +
@@ -1354,7 +1356,9 @@ export function installWebbotRuntime(): void {
      * buscar: el de antes ya no esta en el arbol.
      */
     let groups: Record<string, unknown> = {};
-    if (options.groups?.length) {
+    // Con la lista vacia se abre el selector, se mira que hay y no se elige nada: es la unica
+    // forma de enterarse de los nombres, y antes hacia falta acertar uno para que te los dijeran.
+    if (options.groups) {
       groups = await selectFacebookGroups(options.groups);
       button = await findPublish(8_000);
       if (!button) {

@@ -282,6 +282,10 @@ textos admiten marcadores `{{variable}}`:
 `webbot_post_social` escribe en el composer de Facebook o X y pulsa **Publicar**, sin pedir
 confirmación. Publica de verdad y no se puede deshacer.
 
+En Facebook publica **desde el muro**, y si la pestaña está parada en otra página del sitio la lleva
+allí primero: `/groups/` o `/marketplace/` son Facebook igual, pero tienen su propio cuadro de texto,
+y escribir ahí creyendo que es el del muro publicaría en otro sitio.
+
 **El orden es siempre `dryRun` → confirmar la cuenta → publicar.** Con `dryRun: true` rellena el
 cuadro de texto, localiza el botón y se detiene sin pulsarlo, devolviendo en `account` la cuenta con
 la que saldría el post y en `wrote` el texto que de verdad aceptó el editor.
@@ -300,10 +304,17 @@ de siempre —`dryRun` → tarjeta → publicar— porque publicar en un grupo e
 { "network": "facebook", "text": "…", "groups": ["Memes y más memes", "Mundo de memes"] }
 ```
 
+**Para saber qué grupos hay**, ensaya con la lista vacía:
+
+```json
+{ "network": "facebook", "text": "…", "groups": [], "dryRun": true }
+```
+
+Abre el selector, no elige nada y devuelve en `groupsAvailable` los nombres exactos. Después se
+vuelve a pedir con los que se quieran, copiados tal cual.
+
 **Cada nombre selecciona como mucho un grupo.** `"memes"` podría encajar con cinco, y publicar en
 cinco sitios porque una palabra era ambigua no se puede deshacer; para varios, pasa varios nombres.
-El `dryRun` devuelve en `groupsAvailable` todos los que Facebook ofrece ahí, así que el camino es
-ensayar, mirar la lista y volver a pedir por el nombre exacto.
 
 Si no encaja ninguno **no se publica nada**, ni siquiera en el muro: pedir grupos y acabar
 publicando solo en tu perfil se parece demasiado a haber acertado como para dejarlo pasar.

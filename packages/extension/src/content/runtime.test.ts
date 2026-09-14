@@ -420,6 +420,24 @@ describe("compartir en grupos de Facebook", () => {
     expect(result.button.selector).toBe('[data-testid="publicar"]');
   });
 
+  it("con la lista vacia solo mira que grupos hay, sin elegir ninguno", { timeout: 15_000 }, async () => {
+    // Era imposible enterarse de los nombres: 'groupsAvailable' solo llegaba si ya acertabas uno, y
+    // los nombres eran justo lo que se venia a buscar. Con [] se abre el selector y se lee la lista.
+    const { elegidos } = facebookConGrupos(["Programadores & Software", "Comunidad de Programadores"]);
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "un chiste",
+      dryRun: true,
+      groups: [],
+    })) as { groupsAvailable: string[]; groupsMatched: string[] };
+
+    expect(result.groupsAvailable).toEqual(["Programadores & Software", "Comunidad de Programadores"]);
+    expect(result.groupsMatched).toEqual([]);
+    // Mirar la lista no puede publicar en nada.
+    expect(elegidos).toEqual([]);
+  });
+
   it("un nombre ambiguo elige UN grupo, no todos los que encajan", { timeout: 15_000 }, async () => {
     // "memes" encaja con dos. Publicar en los dos porque la palabra era vaga no se puede deshacer.
     const { elegidos } = facebookConGrupos(["Memes y mas memes", "Mundo de memes"]);

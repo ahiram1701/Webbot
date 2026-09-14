@@ -1197,7 +1197,8 @@ export function installWebbotRuntime(): void {
     if (!opener) {
       throw Object.assign(
         new Error(
-          "No aparece la opcion 'Compartir en grupos' en esta publicacion. Facebook no la ofrece siempre: " +
+          `[runtime ${RUNTIME_VERSION_INNER}] ` +
+            "No aparece la opcion 'Compartir en grupos' en esta publicacion. Facebook no la ofrece siempre: " +
             "depende del tipo de publicacion y de si tienes grupos donde puedas publicar. Lo que si hay: " +
             visibleControls(home),
         ),
@@ -1267,7 +1268,12 @@ export function installWebbotRuntime(): void {
     if (!candidates) {
       throw Object.assign(
         new Error(
-          "La lista de grupos no llego a aparecer tras pulsar 'Compartir en grupos'. Puede que esta " +
+          /**
+           * La version va DELANTE: dos rondas de arreglos se discutieron sin saber si lo que corria
+           * era el codigo nuevo, porque quien cuenta el fallo lo resume y se deja lo de detras.
+           */
+          `[runtime ${RUNTIME_VERSION_INNER}] ` +
+            "La lista de grupos no llego a aparecer tras pulsar 'Compartir en grupos'. Puede que esta " +
             "publicacion no admita compartirse en grupos. Lo que habia en pantalla tras pulsar: " +
             visibleControls(opener.closest('[role="dialog"]') ?? home),
         ),

@@ -790,6 +790,10 @@ describe("compartir en grupos de Facebook", () => {
       webbotCode: "element_not_found",
       message: expect.stringContaining('button "Publicar"'),
     });
+    // Y con que version paso, que es lo que no se podia saber desde fuera.
+    await expect(
+      api.postSocial({ network: "facebook", text: "hola", dryRun: true, groups: [] }),
+    ).rejects.toMatchObject({ message: expect.stringContaining(`[runtime ${RUNTIME_VERSION}]`) });
   });
 
   it("reabre el selector cuando Facebook ya lo traia abierto", { timeout: 30_000 }, async () => {

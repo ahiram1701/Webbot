@@ -386,6 +386,10 @@ describe("compartir en grupos de Facebook", () => {
     recicla?: boolean;
     /** Pulsar la opcion no abre nada. */
     sinLista?: boolean;
+    /** La lista ya esta puesta al llegar, y la opcion la cierra en vez de abrirla. */
+    yaAbierto?: boolean;
+    /** Queda abierto el dialogo de un ensayo anterior, con su Publicar y su opcion de grupos. */
+    restos?: boolean;
   };
 
   function facebookConGrupos(grupos: string[], forma: FormaDelSelector = {}): { elegidos: string[] } {
@@ -397,17 +401,27 @@ describe("compartir en grupos de Facebook", () => {
       porTanda = 0,
       recicla = false,
       sinLista = false,
+      yaAbierto = false,
+      restos = false,
     } = forma;
     const elegidos: string[] = [];
+    // Los restos van DELANTE, que es lo que los hacia ganar cuando se miraba por orden.
+    const reclamo =
+      "Compartir en grupos Llega a mas personas cuando compartes tu publicacion en grupos relevantes.";
+    const sobras = restos
+      ? `<div role="dialog" aria-label="Configuracion de antes" data-testid="restos">
+           <div role="button" aria-label="Volver">volver</div>
+           <div role="button" aria-label="Publicar">Publicar</div>
+           <div role="button" data-testid="abrir-viejo">${reclamo}</div>
+         </div>`
+      : "";
     document.body.innerHTML = `
       <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      ${sobras}
       <div role="dialog" aria-label="Crear publicacion">
         <div role="textbox" contenteditable="true"></div>
         <div role="button" data-testid="siguiente">Siguiente</div>
       </div>`;
-
-    const reclamo =
-      "Compartir en grupos Llega a mas personas cuando compartes tu publicacion en grupos relevantes.";
 
     document.querySelector('[data-testid="siguiente"]')?.addEventListener("click", () => {
       // El nombre accesible puede llevarlo un contenedor y el manejador vivir en un hijo.
@@ -501,10 +515,22 @@ describe("compartir en grupos de Facebook", () => {
         });
       };
 
+      // La opcion alterna: si la lista esta puesta, la quita. Es lo que hace Facebook.
+      const alternarLista = (): void => {
+        const puesta = document.querySelector('[data-testid="lista"]');
+        if (!puesta) {
+          abrirLista();
+          return;
+        }
+        puesta.remove();
+        document.querySelector('[data-testid="listo"]')?.remove();
+      };
+
       const boton =
         ajustes.querySelector('[data-testid="abrir-de-verdad"]') ??
         ajustes.querySelector('[data-testid="abrir-grupos"]');
-      if (!sinLista) boton?.addEventListener("click", abrirLista);
+      if (!sinLista) boton?.addEventListener("click", alternarLista);
+      if (yaAbierto) abrirLista();
     });
     return { elegidos };
   }
@@ -764,6 +790,39 @@ describe("compartir en grupos de Facebook", () => {
       webbotCode: "element_not_found",
       message: expect.stringContaining('button "Publicar"'),
     });
+  });
+
+  it("reabre el selector cuando Facebook ya lo traia abierto", { timeout: 30_000 }, async () => {
+    // Pasa en la segunda publicacion seguida: la lista ya esta puesta, y entonces el clic la
+    // cierra. Esperando solo a que apareciera algo, se agotaba el plazo cerrandola una y otra vez.
+    const { elegidos } = facebookConGrupos(["Memes y mas memes", "Programadores"], { yaAbierto: true });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: ["Memes y mas memes"],
+    })) as { groupsAvailable: string[]; groupsMatched: string[] };
+
+    expect(result.groupsAvailable).toEqual(["Memes y mas memes", "Programadores"]);
+    expect(result.groupsMatched).toEqual(["Memes y mas memes"]);
+    expect(elegidos).toEqual(["Memes y mas memes"]);
+  });
+
+  it("no se queda en los restos de un ensayo anterior", { timeout: 30_000 }, async () => {
+    // Un dialogo sin recoger de la vez anterior se llevaba el turno por estar antes en el arbol:
+    // se encontraba SU "Publicar" y SU "Compartir en grupos", en una pantalla donde ya no pasa nada.
+    const { elegidos } = facebookConGrupos(["Memes y mas memes"], { restos: true });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: ["Memes y mas memes"],
+    })) as { groupsMatched: string[] };
+
+    expect(result.groupsMatched).toEqual(["Memes y mas memes"]);
+    expect(elegidos).toEqual(["Memes y mas memes"]);
   });
 
   it("X no tiene grupos y lo dice en vez de ignorarlos", async () => {

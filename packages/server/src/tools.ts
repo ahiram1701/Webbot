@@ -234,7 +234,10 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
             "cinco sitios sin haberlo pedido. Si te piden compartir en TODOS los grupos de un tema, no intentes " +
             "enumerarlos: pasa las palabras del tema y pon groupsMatchAll:true. Lo que encajaba y se quedo fuera " +
             "vuelve en 'groupsSkipped'; si esa lista no esta vacia, no has compartido en todos los que te pedian. " +
-            "Si pides grupos y no encaja ninguno, no se publica nada.",
+            "Si pides grupos y no encaja ninguno, no se publica nada. " +
+            "SI EL REPARTO EN GRUPOS FALLA, NO LO ARREGLES PUBLICANDO SIN 'groups': es justo lo que el fallo " +
+            "estaba impidiendo, y deja el post donde nadie lo habia pedido. Repite la llamada o cuenta el error " +
+            "tal cual —dice que habia en pantalla— y pregunta que hacer.",
         ),
     },
     toCommand: ({ network, text, dryRun, expectedAccount, groups, groupsMatchAll }) => ({

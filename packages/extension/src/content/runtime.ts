@@ -42,7 +42,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 17;
+export const RUNTIME_VERSION = 18;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -55,7 +55,7 @@ export const RUNTIME_VERSION = 17;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 17;
+  const RUNTIME_VERSION_INNER = 18;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -1006,7 +1006,8 @@ export function installWebbotRuntime(): void {
    * uno de publicar. Volviendo se recupera el composer en vez de crear otro.
    */
   async function facebookBackToComposer(): Promise<Element | null> {
-    const settings = Array.from(document.querySelectorAll('[role="dialog"]')).find(
+    // El ultimo que este abierto, por lo mismo que en findPublish: el de antes son restos.
+    const settings = Array.from(document.querySelectorAll('[role="dialog"]')).reverse().find(
       (dialog) =>
         isVisible(dialog) &&
         buttonByName(SOCIAL.facebook.backNames, dialog) !== null &&
@@ -1211,8 +1212,16 @@ export function installWebbotRuntime(): void {
      * otra forma de fallar: la lista de disponibles venia llena de controles del editor.
      */
     const antes = new Set(groupCandidates(document).map((el) => accessibleName(el).trim()));
-    const nuevos = (): Element[] =>
-      groupCandidates(document).filter((el) => !antes.has(accessibleName(el).trim()));
+    /**
+     * Los nombres que resultaron ser de la lista. Hacen falta porque la lista puede estar YA
+     * abierta: entonces sus filas estaban en 'antes' y "lo que no estaba" no encuentra ninguna.
+     */
+    const deLaLista = new Set<string>();
+    const filas = (): Element[] =>
+      groupCandidates(document).filter((el) => {
+        const name = accessibleName(el).trim();
+        return deLaLista.has(name) || !antes.has(name);
+      });
 
     /**
      * Se prueban por orden los sitios por los que se puede pulsar la opcion, y al primero se le da
@@ -1225,11 +1234,35 @@ export function installWebbotRuntime(): void {
       const target = targets[i];
       if (!target) continue;
       dispatchClick(target);
-      const ultimo = i === targets.length - 1;
-      candidates = await until(() => {
-        const found = nuevos();
-        return found.length > 0 ? found : null;
-      }, ultimo ? 8_000 : 2_000);
+      /**
+       * No se espera a que APAREZCA algo, sino a que CAMBIE algo. Facebook trae a veces el selector
+       * ya abierto —pasa en la segunda publicacion seguida— y entonces el clic lo cierra: las filas
+       * no aparecen, desaparecen. Esperando solo lo primero, ese caso agotaba el plazo con la lista
+       * delante, cerrandola una y otra vez.
+       */
+      const cambio = await until<{ aparecidos?: Element[]; cerrados?: string[] }>(() => {
+        const ahora = groupCandidates(document);
+        const aparecidos = ahora.filter((el) => !antes.has(accessibleName(el).trim()));
+        if (aparecidos.length > 0) return { aparecidos };
+        const siguen = new Set(ahora.map((el) => accessibleName(el).trim()));
+        const cerrados = [...antes].filter((name) => !siguen.has(name));
+        // Que desaparezca TODO no es un selector plegandose: es una pantalla que se ha ido.
+        if (cerrados.length === 0 || cerrados.length === antes.size || !opener.isConnected) return null;
+        return { cerrados };
+      }, i === targets.length - 1 ? 8_000 : 2_000);
+
+      if (cambio?.aparecidos) {
+        for (const el of cambio.aparecidos) deLaLista.add(accessibleName(el).trim());
+        candidates = cambio.aparecidos;
+      } else if (cambio?.cerrados) {
+        // Estaba abierto y se acaba de cerrar: se reabre, y ya se sabe cuales eran sus filas.
+        for (const name of cambio.cerrados) deLaLista.add(name);
+        dispatchClick(target);
+        candidates = await until(() => {
+          const vuelven = filas();
+          return vuelven.length > 0 ? vuelven : null;
+        }, 8_000);
+      }
     }
     if (!candidates) {
       throw Object.assign(
@@ -1250,7 +1283,7 @@ export function installWebbotRuntime(): void {
     // La lista no esta vacia aqui: 'opener' solo cubre el tipo, nunca llega a usarse.
     const primeraFila = candidates[0] ?? opener;
     const listHome: ParentNode = primeraFila.closest('[role="dialog"]') ?? home;
-    const { rows: todas, scroller } = await loadLazyRows(primeraFila, nuevos);
+    const { rows: todas, scroller } = await loadLazyRows(primeraFila, filas);
     candidates = todas.slice(0, GROUPS_SCAN_MAX);
 
     const groupsAvailable = candidates.map(groupLabel);
@@ -1293,7 +1326,7 @@ export function installWebbotRuntime(): void {
          * recicla filas se lleva por delante las que no se ven. Pulsar un nodo desconectado no
          * hace nada y se habria contado como elegido, que es la peor forma de fallar aqui.
          */
-        const vigente = hit.isConnected ? hit : await findRow(label, nuevos, scroller);
+        const vigente = hit.isConnected ? hit : await findRow(label, filas, scroller);
         if (!vigente) {
           anotarDescartado(label);
           continue;
@@ -1313,7 +1346,7 @@ export function installWebbotRuntime(): void {
     const done = buttonByName(SOCIAL.facebook.doneNames, listHome);
     if (done) {
       dispatchClick(done);
-      await until(() => (nuevos().length === 0 ? true : null), 5_000);
+      await until(() => (filas().length === 0 ? true : null), 5_000);
     }
 
     /**
@@ -1555,7 +1588,13 @@ export function installWebbotRuntime(): void {
      */
     const findPublish = (timeoutMs: number): Promise<Element | null> =>
       until(() => {
-        for (const dlg of Array.from(document.querySelectorAll('[role="dialog"]'))) {
+        /**
+         * De atras hacia delante: Facebook apila los dialogos y el de ESTA publicacion es el
+         * ultimo que se abrio. Mirando de delante hacia atras, los restos de un ensayo anterior
+         * que no se llegaron a recoger se llevaban el turno, y a partir de ahi todo —los grupos
+         * incluidos— pasaba en una pantalla muerta donde pulsar no hace nada.
+         */
+        for (const dlg of Array.from(document.querySelectorAll('[role="dialog"]')).reverse()) {
           const el = publishIn(dlg);
           if (el) return el;
         }

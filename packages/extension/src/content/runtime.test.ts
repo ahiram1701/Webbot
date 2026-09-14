@@ -1135,6 +1135,28 @@ describe("postSocial", () => {
     expect(result.account).toBe("Ahiram SG");
   });
 
+  it("no busca al autor en el panel de notificaciones abierto", { timeout: 15_000 }, async () => {
+    // Medido en vivo: con las notificaciones desplegadas, el primer [role=dialog] de la pagina es
+    // el suyo. Se sacaba de ahi un enlace cualquiera como autor, chocaba con la barra lateral y la
+    // identidad quedaba en discordia, asi que no se podia publicar.
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="dialog" aria-label="Notificaciones">
+        <a href="https://www.facebook.com/story.php">Empleos Monterrey publico algo</a>
+        <a href="https://www.facebook.com/OtraPersona">Otra Persona</a>
+      </div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="publicar">Publicar</div>
+      </div>`;
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as {
+      account: string | null;
+    };
+
+    expect(result.account).toBe("Ahiram SG");
+  });
+
   it("acepta el nombre corto del saludo y el completo de la barra lateral como la misma cuenta", async () => {
     document.body.innerHTML = `
       <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>

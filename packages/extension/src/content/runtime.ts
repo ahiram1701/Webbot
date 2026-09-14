@@ -40,7 +40,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 14;
+export const RUNTIME_VERSION = 15;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -53,7 +53,7 @@ export const RUNTIME_VERSION = 14;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 14;
+  const RUNTIME_VERSION_INNER = 15;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -805,7 +805,13 @@ export function installWebbotRuntime(): void {
     return null;
   }
 
-  function facebookAccountNames(): { saludo: string | null; barra: string | null; slug: string | null } {
+  /**
+   * `dialogo` es el del composer. Sin el se cae al primer dialogo visible de la pagina, y ese
+   * puede ser cualquier otro panel abierto: con las notificaciones desplegadas se buscaba al autor
+   * entre ellas, salia el de alguna notificacion y la identidad quedaba en discordia con la barra
+   * lateral, asi que no se podia publicar. Es el mismo cuidado que ya tenia el boton de publicar.
+   */
+  function facebookAccountNames(dialogo?: Element | null): { saludo: string | null; barra: string | null; slug: string | null } {
     let saludo: string | null = null;
     for (const el of Array.from(document.querySelectorAll('[role="button"], [role="textbox"], [aria-placeholder]'))) {
       if (saludo) break;
@@ -818,8 +824,8 @@ export function installWebbotRuntime(): void {
       }
     }
 
-    const dialogo = firstMatching(['[role="dialog"]']);
-    const autor = dialogo ? facebookProfileLink(dialogo) : null;
+    const ambito = dialogo ?? firstMatching(['[role="dialog"]']);
+    const autor = ambito ? facebookProfileLink(ambito) : null;
 
     let barraLink: { slug: string; nombre: string } | null = null;
     for (const nav of Array.from(document.querySelectorAll('[role="navigation"]'))) {
@@ -839,8 +845,8 @@ export function installWebbotRuntime(): void {
    * Nombre con el que se publicaria, o null si no se puede saber o las dos fuentes se contradicen.
    * "Ahiram" y "Ahiram SG" son la misma identidad; "Impulsa CV" y "Ahiram SG" no.
    */
-  function facebookAccount(): string | null {
-    const { saludo, barra, slug } = facebookAccountNames();
+  function facebookAccount(dialogo?: Element | null): string | null {
+    const { saludo, barra, slug } = facebookAccountNames(dialogo);
     if (saludo && barra) {
       const unas = accountKey(saludo).split(" ");
       const otras = accountKey(barra).split(" ");
@@ -1300,12 +1306,14 @@ export function installWebbotRuntime(): void {
      * esta el autor del post, y una pagina recien traida al frente puede no haber pintado todavia
      * la barra lateral. Abrir el dialogo no publica, asi que abortar aqui sigue sin dejar rastro.
      */
+    // El dialogo de ESTE composer, no el primero que haya abierto por ahi.
+    const composerDialog = composer.closest('[role="dialog"]');
     const names =
       (await until(() => {
-        const found = facebookAccountNames();
+        const found = facebookAccountNames(composerDialog);
         return found.saludo || found.barra || found.slug ? found : null;
-      }, 3_000)) ?? facebookAccountNames();
-    const account = facebookAccount();
+      }, 3_000)) ?? facebookAccountNames(composerDialog);
+    const account = facebookAccount(composerDialog);
     // Sin identidad clara no se ofrece ningun alias: si las fuentes se contradicen, no vale ninguna.
     const accountAliases = account
       ? [names.saludo, names.barra, names.slug].filter((name): name is string => Boolean(name))

@@ -1122,14 +1122,11 @@ export function installWebbotRuntime(): void {
       return el.getAttribute("aria-disabled") === "true" ? null : el;
     };
 
-    let button = await until(() => publishIn(scope), 4_000);
-
     /**
      * Si el composer acaba en "Siguiente", "Publicar" vive en la pantalla de configuracion que
      * viene detras. Se avanza y se busca alli, recorriendo los dialogos abiertos porque el nuevo
      * no es el que contenia el composer.
      */
-    /** Publicar en cualquiera de los dialogos abiertos: tras avanzar ya no es el del composer. */
     const findPublish = (timeoutMs: number): Promise<Element | null> =>
       until(() => {
         for (const dlg of Array.from(document.querySelectorAll('[role="dialog"]'))) {
@@ -1139,14 +1136,32 @@ export function installWebbotRuntime(): void {
         return null;
       }, timeoutMs);
 
-    let advancedStep = false;
-    if (!button) {
+    /**
+     * Se esperan los dos a la vez. Antes se agotaban los 4 s buscando "Publicar" en una pantalla
+     * que solo tiene "Siguiente", y ese tiempo muerto se pagaba entero en cada publicacion de las
+     * que van en dos pasos.
+     *
+     * "Siguiente" no se acepta hasta pasado un margen: un "Publicar" que todavia esta
+     * deshabilitado porque el editor no ha confirmado el texto se habilita en cuanto lo hace, y
+     * avanzar de pantalla ahi seria irse por el camino largo sin necesidad. Los dos botones no
+     * suelen convivir, pero el margen sale barato y la equivocacion no.
+     */
+    const GRACIA_SIGUIENTE_MS = 800;
+    const empezo = Date.now();
+    const primero = await until<{ publish?: Element; next?: Element }>(() => {
+      const publish = publishIn(scope);
+      if (publish) return { publish };
+      if (Date.now() - empezo < GRACIA_SIGUIENTE_MS) return null;
       const next = buttonByName(SOCIAL.facebook.nextStepNames, scope);
-      if (next) {
-        dispatchClick(next);
-        advancedStep = true;
-        button = await findPublish(8_000);
-      }
+      return next ? { next } : null;
+    }, 4_000);
+
+    let button = primero?.publish ?? null;
+    let advancedStep = false;
+    if (!button && primero?.next) {
+      dispatchClick(primero.next);
+      advancedStep = true;
+      button = await findPublish(8_000);
     }
 
     if (!button) {

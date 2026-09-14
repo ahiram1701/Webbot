@@ -893,6 +893,55 @@ describe("postSocial", () => {
     expect(result.button.selector).toBe('[data-testid="publicar"]');
   });
 
+  it("no se queda esperando un 'Publicar' que no existe en esa pantalla", { timeout: 15_000 }, async () => {
+    // Cuando el composer acaba en "Siguiente" se esperaban 4 s a un boton que nunca iba a estar, y
+    // ese tiempo muerto se pagaba entero en cada publicacion de las que van en dos pasos.
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="siguiente">Siguiente</div>
+      </div>`;
+    document.querySelector('[data-testid="siguiente"]')?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div role="dialog"><div role="button" data-testid="publicar">Publicar</div></div>`,
+      );
+    });
+
+    const empezo = Date.now();
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as {
+      advancedStep: boolean;
+    };
+
+    expect(result.advancedStep).toBe(true);
+    expect(Date.now() - empezo).toBeLessThan(3_000);
+  });
+
+  it("espera a que se habilite 'Publicar' en vez de irse por el camino largo", { timeout: 15_000 }, async () => {
+    // El precio de no esperar los 4 s seria avanzar de pantalla en cuanto se ve "Siguiente", aunque
+    // el "Publicar" de esta misma se estuviera habilitando. Por eso hay un margen antes de aceptarlo.
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="dialog" aria-label="Crear publicacion">
+        <div role="textbox" contenteditable="true"></div>
+        <div role="button" data-testid="publicar" aria-disabled="true">Publicar</div>
+        <div role="button" data-testid="siguiente">Siguiente</div>
+      </div>`;
+    const avanzo = vi.fn();
+    document.querySelector('[data-testid="siguiente"]')?.addEventListener("click", avanzo);
+    setTimeout(() => document.querySelector('[data-testid="publicar"]')?.setAttribute("aria-disabled", "false"), 300);
+
+    const result = (await api.postSocial({ network: "facebook", text: "hola", dryRun: true })) as {
+      advancedStep: boolean;
+      button: { selector: string };
+    };
+
+    expect(avanzo).not.toHaveBeenCalled();
+    expect(result.advancedStep).toBe(false);
+    expect(result.button.selector).toBe('[data-testid="publicar"]');
+  });
+
   it("escribe en el composer de Facebook sobre un borrador guardado sin duplicarlo", async () => {
     // Facebook guarda el borrador al cerrar el dialogo y lo recupera al reabrirlo.
     const { el } = editorTipoLexical("probando webbot");

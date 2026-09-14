@@ -1,6 +1,7 @@
 import {
   ErrorCodes,
   FlowSchema,
+  PROTOCOL_VERSION,
   interpolateStep,
   profileFor,
   type Command,
@@ -8,6 +9,7 @@ import {
   type FlowStep,
 } from "@webbot/shared";
 
+import { RUNTIME_VERSION } from "../../content/runtime.js";
 import { assertAllowed, WebbotError } from "../allowlist.js";
 import { callRuntime, getTab, requireAllowedTab, waitForTabComplete } from "../inject.js";
 import { getSettings, saveSettings, type WebbotSettings } from "../settings.js";
@@ -347,7 +349,18 @@ export async function runCommand(command: Command, context: CommandContext): Pro
 
     case "config.get":
       return {
-        runtimeVersion: chrome.runtime.getManifest().version,
+        /**
+         * Las tres versiones dicen cosas distintas y hacen falta las tres:
+         *
+         * - `runtimeVersion` es la del codigo que esta extension inyecta en las paginas. Es la que
+         *   responde a "¿surtio efecto la recarga?", y es la que faltaba: aqui se devolvia la del
+         *   manifest con ese nombre, que no cambia casi nunca y hacia parecer que si.
+         * - `extensionVersion` es la del manifest, la que se ve en chrome://extensions.
+         * - `protocolVersion` es la que el puente exige; si no cuadra, la conexion ni se abre.
+         */
+        runtimeVersion: RUNTIME_VERSION,
+        extensionVersion: chrome.runtime.getManifest().version,
+        protocolVersion: PROTOCOL_VERSION,
         allowlist: settings.allowlist,
         bridgePort: settings.bridgePort,
         flows: Object.keys(settings.flows),

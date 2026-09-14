@@ -48,8 +48,9 @@ export function createWebbotMcpServer(bridge: Bridge): McpServer {
     "webbot_status",
     {
       description:
-        "Estado de la extension: si esta conectada, version, allowlist de dominios activa y cuantos flujos hay " +
-        "guardados. Empieza por aqui si algo falla.",
+        "Estado de la extension: si esta conectada, que versiones corre, allowlist de dominios activa y cuantos " +
+        "flujos hay guardados. Empieza por aqui si algo falla. 'runtimeVersion' es la del codigo que se inyecta en " +
+        "las paginas: si no coincide con la que esperas, la extension no se ha recargado con el build nuevo.",
       inputSchema: {},
     },
     async () => {

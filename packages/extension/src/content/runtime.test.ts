@@ -37,6 +37,9 @@ function patchJsdom(): void {
     },
   });
   Element.prototype.scrollIntoView = () => {};
+  // Sin layout no hay forma de saber que hay delante: se contesta que el punto cae en el body,
+  // que hace que todo elemento cuente como alcanzable. En Chrome esto lo resuelve el navegador.
+  document.elementFromPoint = () => document.body;
 }
 
 let api: WebbotApi;
@@ -390,9 +393,16 @@ describe("compartir en grupos de Facebook", () => {
     yaAbierto?: boolean;
     /** Queda abierto el dialogo de un ensayo anterior, con su Publicar y su opcion de grupos. */
     restos?: boolean;
+    /** Cada fila lleva su casilla dentro, como el selector de verdad. */
+    conCasilla?: boolean;
+    /** La casilla no cambia al pulsar: imita una fila que no esta de verdad delante. */
+    casillaMuerta?: boolean;
   };
 
-  function facebookConGrupos(grupos: string[], forma: FormaDelSelector = {}): { elegidos: string[] } {
+  function facebookConGrupos(
+    grupos: string[],
+    forma: FormaDelSelector = {},
+  ): { elegidos: string[]; clics: () => number } {
     const {
       dialogoAparte = false,
       rolFila = "button",
@@ -403,8 +413,11 @@ describe("compartir en grupos de Facebook", () => {
       sinLista = false,
       yaAbierto = false,
       restos = false,
+      conCasilla = false,
+      casillaMuerta = false,
     } = forma;
     const elegidos: string[] = [];
+    let clics = 0;
     // Los restos van DELANTE, que es lo que los hacia ganar cuando se miraba por orden.
     const reclamo =
       "Compartir en grupos Llega a mas personas cuando compartes tu publicacion en grupos relevantes.";
@@ -460,13 +473,17 @@ describe("compartir en grupos de Facebook", () => {
           `<div data-testid="lista"></div><div role="button" aria-label="Listo" data-testid="listo">Listo</div>`,
         );
         const lista = casa.querySelector('[data-testid="lista"]') as HTMLElement;
+        const casilla = conCasilla ? '<input type="checkbox" />' : "";
         const fila = (nombre: string): string =>
-          `<div role="${rolFila}">${nombre} Tu ultima visita fue hace aproximadamente un mes</div>`;
+          `<div role="${rolFila}">${casilla}${nombre} Tu ultima visita fue hace aproximadamente un mes</div>`;
         const escuchar = (): void => {
           for (const el of Array.from(lista.children)) {
             if (el.hasAttribute("data-escuchando")) continue;
             el.setAttribute("data-escuchando", "1");
             el.addEventListener("click", () => {
+              const caja = el.querySelector('input[type="checkbox"]');
+              if (caja && casillaMuerta) return;
+              if (caja instanceof HTMLInputElement) caja.checked = true;
               elegidos.push((el.textContent ?? "").replace(/ Tu ultima visita.*$/, "").trim());
             });
           }
@@ -529,10 +546,13 @@ describe("compartir en grupos de Facebook", () => {
       const boton =
         ajustes.querySelector('[data-testid="abrir-de-verdad"]') ??
         ajustes.querySelector('[data-testid="abrir-grupos"]');
+      boton?.addEventListener("click", () => {
+        clics += 1;
+      });
       if (!sinLista) boton?.addEventListener("click", alternarLista);
       if (yaAbierto) abrirLista();
     });
-    return { elegidos };
+    return { elegidos, clics: () => clics };
   }
 
   it("elige los grupos pedidos y vuelve a la pantalla donde vive Publicar", { timeout: 15_000 }, async () => {
@@ -827,6 +847,60 @@ describe("compartir en grupos de Facebook", () => {
 
     expect(result.groupsMatched).toEqual(["Memes y mas memes"]);
     expect(elegidos).toEqual(["Memes y mas memes"]);
+  });
+
+  it("lee el selector ya montado sin volver a pulsarlo", { timeout: 30_000 }, async () => {
+    // Lo medido sobre el Facebook real: la pantalla de grupos se queda montada, sus filas siguen
+    // contando como visibles, y "lo que no estaba antes de pulsar" no encuentra ni una. Encima,
+    // pulsar la opcion con el selector abierto lo CIERRA, asi que el intento se comia a si mismo.
+    const { elegidos, clics } = facebookConGrupos(["Memes y mas memes", "Programadores"], {
+      conCasilla: true,
+      yaAbierto: true,
+    });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: ["Memes y mas memes"],
+    })) as { groupsAvailable: string[]; groupsMatched: string[] };
+
+    expect(result.groupsAvailable).toEqual(["Memes y mas memes", "Programadores"]);
+    expect(result.groupsMatched).toEqual(["Memes y mas memes"]);
+    expect(elegidos).toEqual(["Memes y mas memes"]);
+    // Y no se pulso la opcion: habria cerrado el selector que ya estaba delante.
+    expect(clics()).toBe(0);
+  });
+
+  it("abre el selector de casillas cuando no esta puesto", { timeout: 30_000 }, async () => {
+    const { elegidos, clics } = facebookConGrupos(["Memes y mas memes", "Programadores"], {
+      conCasilla: true,
+    });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: ["Programadores"],
+    })) as { groupsMatched: string[] };
+
+    expect(result.groupsMatched).toEqual(["Programadores"]);
+    expect(elegidos).toEqual(["Programadores"]);
+    expect(clics()).toBe(1);
+  });
+
+  it("no cuenta como compartido un grupo cuya casilla no cambia", { timeout: 30_000 }, async () => {
+    // Pulsar una fila que no esta delante no hace nada. Contarla igual seria anunciar como
+    // compartido algo que no se compartio, que es lo que nadie va a ir a comprobar.
+    const { elegidos } = facebookConGrupos(["Memes y mas memes", "Programadores"], {
+      conCasilla: true,
+      casillaMuerta: true,
+    });
+
+    await expect(
+      api.postSocial({ network: "facebook", text: "hola", dryRun: true, groups: ["Memes y mas memes"] }),
+    ).rejects.toMatchObject({ webbotCode: "element_not_found" });
+    expect(elegidos).toEqual([]);
   });
 
   it("X no tiene grupos y lo dice en vez de ignorarlos", async () => {

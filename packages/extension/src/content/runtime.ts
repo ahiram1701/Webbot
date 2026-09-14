@@ -42,7 +42,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 18;
+export const RUNTIME_VERSION = 19;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -55,7 +55,7 @@ export const RUNTIME_VERSION = 18;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 18;
+  const RUNTIME_VERSION_INNER = 19;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -116,6 +116,8 @@ export function installWebbotRuntime(): void {
         // Lo que el propio selector puede repintar al abrirse: aparece como "nuevo" sin ser un grupo.
         /^publicar$/i, /^post$/i, /^siguiente$/i, /^next$/i, /^foto\/video$/i, /^photo\/video$/i,
         /^compartir en grupos/i, /^share (to|in) groups/i,
+        // Lleva casilla y no es un grupo: seria el unico "grupo" de la pantalla de ajustes.
+        /^promocionar/i, /^boost/i,
       ],
       /**
        * Una fila de grupo no siempre es un boton: con casilla es un checkbox, y en algunas
@@ -123,6 +125,8 @@ export function installWebbotRuntime(): void {
        */
       pickerRows:
         '[role="button"], button, [role="checkbox"], [role="menuitemcheckbox"], [role="option"], [role="switch"]',
+      /** La casilla que lleva dentro una fila de grupo, que es lo que la delata. */
+      pickerBox: 'input[type="checkbox"], [role="checkbox"], [role="menuitemcheckbox"]',
       // El composer saluda a quien publica: "¿Qué estás pensando, Impulsa CV?". Si la sesion actua
       // como una pagina, ese nombre es el de la pagina y no el del perfil personal.
       accountInPrompt: [/pensando,\s*(.+?)\s*\?\s*$/i, /on your mind,\s*(.+?)\s*\?\s*$/i],
@@ -1057,6 +1061,47 @@ export function installWebbotRuntime(): void {
   }
 
   /**
+   * Si el punto central del elemento devuelve al propio elemento, esta de verdad delante. Hace
+   * falta porque Facebook deja montadas las pantallas por las que ya pasaste: sus filas siguen
+   * midiendo como visibles un rato, y pulsar una de esas no hace absolutamente nada.
+   */
+  function isHittable(el: Element): boolean {
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return hit !== null && (el.contains(hit) || hit.contains(el));
+  }
+
+  /** Si la fila esta marcada, cuando se puede saber. null = esta fila no lleva casilla. */
+  function rowChecked(el: Element): boolean | null {
+    const box = el.matches(SOCIAL.facebook.pickerBox) ? el : el.querySelector(SOCIAL.facebook.pickerBox);
+    if (!box) return null;
+    if (box instanceof HTMLInputElement) return box.checked;
+    const aria = box.getAttribute("aria-checked");
+    return aria === null ? null : aria === "true";
+  }
+  /**
+   * Las filas del selector de grupos. Una fila de grupo lleva su casilla dentro, y eso es lo que
+   * la separa de un control del editor sin fiarse de su nombre ni de que acabe de aparecer.
+   * Medido en vivo: de 41 elementos con casilla en el arbol —Facebook deja montadas las pantallas
+   * por las que ya has pasado—, los 20 que ademas estan visibles son exactamente los grupos.
+   */
+  function groupRows(scope: ParentNode): Element[] {
+    const vistos = new Set<string>();
+    const found: Element[] = [];
+    for (const el of Array.from(scope.querySelectorAll('[role="button"], button'))) {
+      if (!isVisible(el)) continue;
+      if (!el.matches(SOCIAL.facebook.pickerBox) && !el.querySelector(SOCIAL.facebook.pickerBox)) continue;
+      const name = accessibleName(el).trim();
+      if (!name || vistos.has(name)) continue;
+      if (SOCIAL.facebook.pickerNoise.some((pattern) => pattern.test(name))) continue;
+      vistos.add(name);
+      found.push(el);
+      if (found.length >= GROUPS_SCAN_MAX) break;
+    }
+    return found;
+  }
+  /**
    * Por donde se puede pulsar una opcion cuando el nombre lo lleva un contenedor. El clic burbujea
    * hacia ARRIBA y nunca hacia abajo: si el manejador vive en un hijo —y en Facebook el nombre que
    * encaja es el del reclamo entero, que suele ser el de la seccion y no el del boton— pulsar el
@@ -1186,86 +1231,99 @@ export function installWebbotRuntime(): void {
     home: ParentNode = document,
   ): Promise<Record<string, unknown>> {
     /**
-     * La opcion se busca PRIMERO en la pantalla de esta publicacion. Buscarla en el documento
-     * entero encontraba cualquier "Compartir en grupos" suelto por la pagina —el feed esta lleno—
-     * y entonces se pulsaba algo que no abria ninguna lista: ocho segundos esperando a que se
-     * abriera una lista que nadie habia abierto.
-     */
-    const opener =
-      buttonByName(SOCIAL.facebook.shareToGroupsNames, home) ??
-      buttonByName(SOCIAL.facebook.shareToGroupsNames);
-    if (!opener) {
-      throw Object.assign(
-        new Error(
-          `[runtime ${RUNTIME_VERSION_INNER}] ` +
-            "No aparece la opcion 'Compartir en grupos' en esta publicacion. Facebook no la ofrece siempre: " +
-            "depende del tipo de publicacion y de si tienes grupos donde puedas publicar. Lo que si hay: " +
-            visibleControls(home),
-        ),
-        { webbotCode: "element_not_found" },
-      );
-    }
-    /**
-     * La lista suele salir DENTRO del mismo dialogo de configuracion, pero no hace falta creerselo:
-     * se mira el documento entero. Lo que distingue a un grupo no es donde esta, sino ser NUEVO: lo
-     * que no estaba antes de pulsar es de la lista. Asi da igual que Facebook la pinte en otro
-     * dialogo, y tampoco hay que distinguir un grupo de un "Foto/video" por su nombre, que era la
-     * otra forma de fallar: la lista de disponibles venia llena de controles del editor.
+     * Una fila de grupo se reconoce por lo que ES —lleva su casilla dentro—, no por ser nueva.
+     *
+     * Medido sobre el Facebook real: la pantalla de "Compartir en grupos" se queda montada cuando
+     * sales de ella, y ahi siguen sus filas, midiendo como visibles. "Lo que no estaba antes de
+     * pulsar" no encontraba entonces ni una, asi que en cuanto el selector se habia abierto una
+     * vez, todos los intentos siguientes decian que la lista no habia aparecido —con la lista
+     * delante— hasta recargar la pagina. Era exactamente lo que pasaba: el primer ensayo traia los
+     * grupos y ninguno de los siguientes.
+     *
+     * 'novedades' se queda de recambio para las variantes del selector que no traen casillas.
      */
     const antes = new Set(groupCandidates(document).map((el) => accessibleName(el).trim()));
-    /**
-     * Los nombres que resultaron ser de la lista. Hacen falta porque la lista puede estar YA
-     * abierta: entonces sus filas estaban en 'antes' y "lo que no estaba" no encuentra ninguna.
-     */
+    /** Nombres que resultaron ser de la lista, para el recambio: sin esto, reabrirla no los ve. */
     const deLaLista = new Set<string>();
-    const filas = (): Element[] =>
+    const novedades = (): Element[] =>
       groupCandidates(document).filter((el) => {
         const name = accessibleName(el).trim();
         return deLaLista.has(name) || !antes.has(name);
       });
+    const filas = (): Element[] => {
+      const conCasilla = groupRows(document);
+      return conCasilla.length > 0 ? conCasilla : novedades();
+    };
 
     /**
-     * Se prueban por orden los sitios por los que se puede pulsar la opcion, y al primero se le da
-     * un plazo corto: si el nombre lo llevaba un contenedor sin manejador, el clic no hace nada, y
-     * agotar ahi el plazo largo solo retrasa el intento que si funciona.
+     * Si ya esta abierto no se pulsa: pulsar lo CERRARIA. Y esta abierto mas a menudo de lo que
+     * parece, porque la pantalla de ajustes se trae el selector montado de antemano.
      */
-    const targets = clickTargets(opener);
     let candidates: Element[] | null = null;
-    for (let i = 0; i < targets.length && !candidates; i += 1) {
-      const target = targets[i];
-      if (!target) continue;
-      dispatchClick(target);
-      /**
-       * No se espera a que APAREZCA algo, sino a que CAMBIE algo. Facebook trae a veces el selector
-       * ya abierto —pasa en la segunda publicacion seguida— y entonces el clic lo cierra: las filas
-       * no aparecen, desaparecen. Esperando solo lo primero, ese caso agotaba el plazo con la lista
-       * delante, cerrandola una y otra vez.
-       */
-      const cambio = await until<{ aparecidos?: Element[]; cerrados?: string[] }>(() => {
-        const ahora = groupCandidates(document);
-        const aparecidos = ahora.filter((el) => !antes.has(accessibleName(el).trim()));
-        if (aparecidos.length > 0) return { aparecidos };
-        const siguen = new Set(ahora.map((el) => accessibleName(el).trim()));
-        const cerrados = [...antes].filter((name) => !siguen.has(name));
-        // Que desaparezca TODO no es un selector plegandose: es una pantalla que se ha ido.
-        if (cerrados.length === 0 || cerrados.length === antes.size || !opener.isConnected) return null;
-        return { cerrados };
-      }, i === targets.length - 1 ? 8_000 : 2_000);
+    // Dos, no una: una casilla suelta en la pantalla de ajustes no es una lista de grupos.
+    const yaPuestas = groupRows(document).filter(isHittable);
+    if (yaPuestas.length >= 2) candidates = yaPuestas;
 
-      if (cambio?.aparecidos) {
-        for (const el of cambio.aparecidos) deLaLista.add(accessibleName(el).trim());
-        candidates = cambio.aparecidos;
-      } else if (cambio?.cerrados) {
-        // Estaba abierto y se acaba de cerrar: se reabre, y ya se sabe cuales eran sus filas.
-        for (const name of cambio.cerrados) deLaLista.add(name);
+    let opener: Element | null = null;
+    if (!candidates) {
+      /**
+       * La opcion se busca PRIMERO en la pantalla de esta publicacion. Buscarla en el documento
+       * entero encontraba cualquier "Compartir en grupos" suelto por la pagina —el feed esta
+       * lleno— y entonces se pulsaba algo que no abria ninguna lista.
+       */
+      opener =
+        buttonByName(SOCIAL.facebook.shareToGroupsNames, home) ??
+        buttonByName(SOCIAL.facebook.shareToGroupsNames);
+      if (!opener) {
+        throw Object.assign(
+          new Error(
+            `[runtime ${RUNTIME_VERSION_INNER}] ` +
+              "No aparece la opcion 'Compartir en grupos' en esta publicacion. Facebook no la ofrece siempre: " +
+              "depende del tipo de publicacion y de si tienes grupos donde puedas publicar. Lo que si hay: " +
+              visibleControls(home),
+          ),
+          { webbotCode: "element_not_found" },
+        );
+      }
+
+      /**
+       * Se prueban por orden los sitios por los que se puede pulsar, y al primero se le da un plazo
+       * corto: si el nombre lo llevaba un contenedor sin manejador, el clic no hace nada, y agotar
+       * ahi el plazo largo solo retrasa el intento que si funciona.
+       */
+      const targets = clickTargets(opener);
+      for (let i = 0; i < targets.length && !candidates; i += 1) {
+        const target = targets[i];
+        if (!target) continue;
         dispatchClick(target);
-        candidates = await until(() => {
-          const vuelven = filas();
-          return vuelven.length > 0 ? vuelven : null;
-        }, 8_000);
+        const cambio = await until<{ puestas?: Element[]; cerrados?: string[] }>(() => {
+          const puestas = filas();
+          if (puestas.length > 0) return { puestas };
+          // Sin casillas y sin novedades, aun queda que el clic haya CERRADO un selector abierto.
+          const ahora = groupCandidates(document);
+          const siguen = new Set(ahora.map((el) => accessibleName(el).trim()));
+          const cerrados = [...antes].filter((name) => !siguen.has(name));
+          // Que desaparezca TODO no es un selector plegandose: es una pantalla que se ha ido.
+          if (cerrados.length === 0 || cerrados.length === antes.size || !opener?.isConnected) return null;
+          return { cerrados };
+        }, i === targets.length - 1 ? 8_000 : 2_000);
+
+        if (cambio?.puestas) {
+          candidates = cambio.puestas;
+        } else if (cambio?.cerrados) {
+          // Estaba abierto y se acaba de cerrar: se reabre, y ya se sabe cuales eran sus filas.
+          for (const name of cambio.cerrados) deLaLista.add(name);
+          dispatchClick(target);
+          candidates = await until(() => {
+            const vuelven = filas();
+            return vuelven.length > 0 ? vuelven : null;
+          }, 8_000);
+        }
       }
     }
-    if (!candidates) {
+
+    const primeraFila = candidates?.[0] ?? null;
+    if (!candidates || !primeraFila) {
       throw Object.assign(
         new Error(
           /**
@@ -1275,7 +1333,7 @@ export function installWebbotRuntime(): void {
           `[runtime ${RUNTIME_VERSION_INNER}] ` +
             "La lista de grupos no llego a aparecer tras pulsar 'Compartir en grupos'. Puede que esta " +
             "publicacion no admita compartirse en grupos. Lo que habia en pantalla tras pulsar: " +
-            visibleControls(opener.closest('[role="dialog"]') ?? home),
+            visibleControls(opener?.closest('[role="dialog"]') ?? home),
         ),
         { webbotCode: "element_not_found" },
       );
@@ -1286,8 +1344,6 @@ export function installWebbotRuntime(): void {
      * que cupieron en pantalla es lo que hacia que "comparte en todos mis grupos de software" se
      * quedara en tres cuando habia doce.
      */
-    // La lista no esta vacia aqui: 'opener' solo cubre el tipo, nunca llega a usarse.
-    const primeraFila = candidates[0] ?? opener;
     const listHome: ParentNode = primeraFila.closest('[role="dialog"]') ?? home;
     const { rows: todas, scroller } = await loadLazyRows(primeraFila, filas);
     candidates = todas.slice(0, GROUPS_SCAN_MAX);
@@ -1337,9 +1393,24 @@ export function installWebbotRuntime(): void {
           anotarDescartado(label);
           continue;
         }
+        // Las filas de abajo estan montadas pero fuera de la parte visible de la lista, y ahi
+        // el clic no llega: se trae la fila a la vista antes de pulsarla.
+        vigente.scrollIntoView({ block: "center" });
+        await sleep(150);
+        const marcadaAntes = rowChecked(vigente);
         dispatchClick(vigente);
-        groupsMatched.push(label);
         await sleep(350);
+        /**
+         * Y se comprueba que la casilla haya cambiado. Pulsar una fila que no esta delante no
+         * hace nada, y darla por elegida es la peor salida posible: se anuncia como compartido
+         * algo que no se compartio, que es justo lo que nadie va a ir a verificar.
+         */
+        const despues = rowChecked(vigente.isConnected ? vigente : ((await findRow(label, filas, scroller)) ?? vigente));
+        if (marcadaAntes !== null && despues === marcadaAntes) {
+          anotarDescartado(label);
+          continue;
+        }
+        groupsMatched.push(label);
       }
       // Los que encajaban y no se cogieron por ir de uno en uno: se dicen para poder pedirlos.
       if (!matchAll) {
@@ -1352,7 +1423,9 @@ export function installWebbotRuntime(): void {
     const done = buttonByName(SOCIAL.facebook.doneNames, listHome);
     if (done) {
       dispatchClick(done);
-      await until(() => (filas().length === 0 ? true : null), 5_000);
+      // No se espera a que la lista se vaya: Facebook la deja montada, y eso era esperar en
+      // balde hasta agotar el plazo. Quien confirma la vuelta es el 'Publicar' de despues.
+      await sleep(600);
     }
 
     /**

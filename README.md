@@ -201,6 +201,7 @@ Se añade el hostname exacto, no el dominio padre: permitir `gist.github.com` no
 | `webbot_screenshot` | Captura PNG de la parte visible. Le llega al modelo como imagen si tiene visión. |
 | `webbot_click` / `webbot_type` / `webbot_scroll` / `webbot_wait_for` | Interacción. |
 | `webbot_post_social` | Publica en Facebook o X, y con `groups` comparte además en grupos. |
+| `webbot_share_post` | Comparte en tu muro una publicación de Facebook que ya existe. |
 | `webbot_flow_list` / `webbot_flow_run` | Flujos guardados. |
 
 El orden que funciona es siempre el mismo: `webbot_outline` para **ver** qué hay en la página y
@@ -310,10 +311,37 @@ publicando solo en tu perfil se parece demasiado a haber acertado como para deja
 La tarjeta del panel cambia de título a **«Publicar y compartir en grupos»** y los lista uno a uno.
 Aprobar «publicar en Facebook» sin saber que además sale en cinco grupos no es aprobarlo.
 
-**Lo que sigue sin saber hacer:** compartir una publicación que *ya existe* y elegir audiencia. El
-agente tiene instrucciones de decirlo en vez de montarlo a mano con `webbot_click`, y no por
-pedantería: publicar a base de clics se salta la comprobación de cuenta y la tarjeta de
-confirmación, o sea las dos cosas que impiden publicar algo sin permiso. Para publicar de verdad hay que pasar esa cuenta en `expectedAccount`
+### Compartir una publicación existente
+
+`webbot_share_post` es el botón **Compartir** de una publicación del feed. Mismo guion:
+
+```json
+{ "tabId": 7, "target": { "text": "un trozo del texto de la publicación" }, "comment": "jaja" }
+```
+
+Lo delicado es **a cuál**. El feed está lleno de botones Compartir idénticos, así que el `target`
+se usa para acotar la publicación —subiendo hasta su `[role=article]`— y el botón se busca *dentro
+de ese contenedor*. Pulsar el primero de la página compartiría una publicación cualquiera.
+
+**No usa «Compartir ahora», y no puede.** Esa opción publica al instante sin abrir nada, así que no
+habría dónde parar el ensayo ni tarjeta que enseñar. Solo se elige el destino que abre un cuadro de
+publicación, y a partir de ahí es exactamente el mismo camino que publicar: identidad, ensayo,
+tarjeta, recogida.
+
+Para compartir de verdad hacen falta **dos** confirmaciones, no una: `expectedAccount` como
+siempre, y `expectedPost` con el extracto que devolvió el ensayo en `sharing`. Un feed se reordena
+solo; sin esa segunda comprobación el mismo `target` podría estar apuntando ya a otra publicación un
+segundo después, y compartir la equivocada no se deshace.
+
+Los nombres de las opciones del menú de compartir cambian con el idioma y con la versión de
+Facebook. Si ninguno encaja, el error **lista los que Facebook ofreció ahí**, que es lo que permite
+corregir el patrón en `SOCIAL.facebook.share` sin adivinar.
+
+**Lo que sigue sin saber hacer:** compartir una publicación existente *dentro de un grupo* (es otro
+subdiálogo, con sus propios nombres) y elegir audiencia. El agente tiene instrucciones de decirlo en
+vez de montarlo a mano con `webbot_click`, y no por pedantería: publicar a base de clics se salta la
+comprobación de cuenta y la tarjeta de confirmación, o sea las dos cosas que impiden publicar algo
+sin permiso. Para publicar de verdad hay que pasar esa cuenta en `expectedAccount`
 (`@usuario` en X, nombre visible en Facebook): sin ella, o si no coincide, se aborta antes de
 escribir nada. Importa sobre todo en Facebook, donde la sesión puede estar actuando como una página
 en lugar de como tu perfil.

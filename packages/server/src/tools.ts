@@ -235,6 +235,45 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
   }),
 
   tool({
+    name: "webbot_share_post",
+    description:
+      "Comparte en tu muro una publicacion de Facebook QUE YA EXISTE, con un comentario opcional. " +
+      "COMPARTE DE VERDAD: es publico e irreversible, igual que webbot_post_social. " +
+      "El 'target' senala la publicacion; lo mas fiable es un trozo de su texto. Se acota a ESA publicacion " +
+      "antes de pulsar nada, porque el feed esta lleno de botones Compartir identicos. " +
+      "Haz siempre dryRun:true primero: devuelve en 'sharing' el extracto de la publicacion y en 'account' la " +
+      "cuenta con la que se compartiria. Despues llama otra vez con dryRun:false pasando los dos.",
+    shape: {
+      tabId,
+      target: TargetSchema,
+      comment: z.string().optional().describe("Que decir al compartir. Vacio = compartir sin comentario."),
+      dryRun: z.boolean().optional().describe("true = llega hasta el boton y se detiene. Por defecto false."),
+      expectedAccount: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Obligatorio con dryRun:false, igual que en webbot_post_social."),
+      expectedPost: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Obligatorio con dryRun:false: el extracto que devolvio el ensayo en 'sharing'. Un feed se reordena " +
+            "solo, asi que sin esto el mismo target podria estar apuntando ya a otra publicacion.",
+        ),
+    },
+    toCommand: ({ tabId: id, target, comment, dryRun, expectedAccount, expectedPost }) => ({
+      type: "social.share",
+      tabId: id,
+      target,
+      comment,
+      dryRun,
+      expectedAccount,
+      expectedPost,
+    }),
+  }),
+
+  tool({
     name: "webbot_flow_list",
     description: "Lista los flujos guardados en la extension con su descripcion y variables.",
     shape: {},
@@ -263,7 +302,7 @@ export const WEBBOT_TOOLS_BY_NAME = new Map(WEBBOT_TOOLS.map((entry) => [entry.n
  * agente se invente un camino a mano.
  */
 const ALCANCE_PUBLICAR =
-  "webbot_post_social escribe en el muro o el perfil, y eso es TODO lo que sabe hacer: no comparte una publicacion que ya existe, no publica dentro de un grupo, no elige audiencia ni destinatarios. Si te piden algo de eso, dilo y para; no lo montes a mano con webbot_click por la interfaz. Publicar a base de clics se salta la comprobacion de con que cuenta se publica y, en el panel, la tarjeta con la que la persona aprueba: acabarias publicando sin que nadie te lo haya confirmado.";
+  "Para sacar algo en publico solo valen webbot_post_social (escribir en el muro, y con 'groups' repartirlo tambien en grupos) y webbot_share_post (compartir una publicacion que ya existe). Elegir audiencia o destinatarios no esta soportado: dilo y para. Lo que NUNCA vale es montarlo a mano con webbot_click por la interfaz, porque publicar a base de clics se salta la comprobacion de con que cuenta se publica y, en el panel, la tarjeta con la que la persona aprueba: acabarias publicando sin que nadie te lo haya confirmado.";
 
 /** Como se conduce la pagina. Igual para los dos cerebros. */
 const CONDUCIR = [

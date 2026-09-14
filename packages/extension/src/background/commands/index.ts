@@ -259,6 +259,21 @@ export async function runCommand(command: Command, context: CommandContext): Pro
       return { tabId: command.tabId, url: tab.url ?? "", dataUrl };
     }
 
+    case "social.share": {
+      // Compartir actua sobre una publicacion concreta de una pestana concreta: aqui el tabId lo
+      // pone quien llama, no se busca una pestana de Facebook cualquiera como en social.post.
+      await requireAllowedTab(command.tabId, settings.allowlist);
+      await focusTab(command.tabId);
+      return callRuntime(command.tabId, "sharePost", {
+        target: command.target,
+        comment: command.comment,
+        dryRun: command.dryRun ?? false,
+        expectedAccount: command.expectedAccount,
+        expectedPost: command.expectedPost,
+        deadlineAt: context.deadlineAt,
+      });
+    }
+
     case "social.post": {
       const tabId = await tabForNetwork(command.network, settings.allowlist);
       await focusTab(tabId);

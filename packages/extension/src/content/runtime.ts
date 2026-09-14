@@ -17,6 +17,16 @@ export interface WebbotApi {
   type(options: { target: Target; text: string; clear?: boolean; submit?: boolean }): Promise<unknown>;
   scroll(options: { direction: "up" | "down" | "top" | "bottom"; amount?: number }): Promise<unknown>;
   waitFor(options: { target: Target; timeoutMs?: number }): Promise<unknown>;
+  sharePost(options: {
+    target: Target;
+    /** Comentario opcional al compartir. Vacio = compartir sin decir nada. */
+    comment?: string;
+    dryRun?: boolean;
+    expectedAccount?: string;
+    /** Extracto devuelto por el ensayo. Obligatorio para compartir de verdad. */
+    expectedPost?: string;
+    deadlineAt?: number;
+  }): Promise<unknown>;
   postSocial(options: {
     network: Network;
     text: string;
@@ -30,7 +40,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 12;
+export const RUNTIME_VERSION = 13;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -43,7 +53,7 @@ export const RUNTIME_VERSION = 12;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 12;
+  const RUNTIME_VERSION_INNER = 13;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -83,6 +93,21 @@ export function installWebbotRuntime(): void {
       shareToGroupsNames: [/^compartir en grupos/i, /^share (to|in) groups/i],
       doneNames: [/^listo$/i, /^done$/i, /^hecho$/i],
       // Controles del selector que NO son grupos, para no confundirlos con uno al elegir.
+      share: {
+        // El nombre accesible medido en vivo sobre una publicacion del feed no es 'Compartir':
+        // es el reclamo entero, y el texto del boton es el numero de veces compartida.
+        buttonNames: [/^compartir$/i, /^share$/i, /^env[ií]a esto a tus amigos/i, /^send this to friends/i],
+        // Para acotar el boton a SU publicacion y no pulsar el de otra del feed.
+        containers: ['[role="article"]', "article"],
+        /**
+         * Destinos que abren un composer. "Compartir ahora" NO esta y no puede estar: publica al
+         * instante sin abrir nada, asi que no habria donde parar el ensayo ni tarjeta que
+         * ensenar, que son justo las dos cosas que impiden publicar sin permiso.
+         */
+        toFeedNames: [/^compartir en (el )?(feed|tu perfil|tu biograf)/i, /^share to (your )?(feed|profile|timeline)/i],
+        // Lo que no es un destino, para poder listar los que si cuando ninguno encaje.
+        noise: [/^cerrar$/i, /^close$/i, /^buscar/i, /^search/i, /^copiar enlace/i, /^copy link/i],
+      },
       pickerNoise: [/^listo$/i, /^done$/i, /^hecho$/i, /^volver$/i, /^back$/i, /^atr[aá]s$/i, /^cerrar$/i, /^close$/i, /^buscar/i, /^search/i, /^eliminar/i, /^remove/i, /^quitar/i],
       // El composer saluda a quien publica: "¿Qué estás pensando, Impulsa CV?". Si la sesion actua
       // como una pagina, ese nombre es el de la pagina y no el del perfil personal.
@@ -1059,6 +1084,136 @@ export function installWebbotRuntime(): void {
     return { groupsMatched, groupsMissing, groupsAvailable };
   }
 
+  /** Como buttonByName pero tambien mira menus y enlaces: un destino no siempre es un boton. */
+  function optionByName(patterns: RegExp[], root: ParentNode): Element | null {
+    for (const el of Array.from(root.querySelectorAll('[role="button"], [role="menuitem"], button, a[href]'))) {
+      if (!isVisible(el)) continue;
+      if (patterns.some((pattern) => pattern.test(accessibleName(el).trim()))) return el;
+    }
+    return null;
+  }
+
+  /**
+   * La publicacion a la que pertenece un elemento. Acotar importa mas de lo que parece: el feed
+   * esta lleno de botones 'Compartir' identicos, y pulsar el primero de la pagina compartiria una
+   * publicacion cualquiera en vez de la que se pidio.
+   */
+  function facebookPostContainer(el: Element): Element {
+    for (const selector of SOCIAL.facebook.share.containers) {
+      const found = el.closest(selector);
+      if (found) return found;
+    }
+    // Sin contenedor reconocible se sube hasta el primer antepasado que tenga un Compartir dentro.
+    let node: Element | null = el;
+    for (let depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
+      if (buttonByName(SOCIAL.facebook.share.buttonNames, node)) return node;
+    }
+    throw Object.assign(
+      new Error(
+        "No se pudo acotar la publicacion a la que pertenece ese elemento, y sin acotarla no se pulsa " +
+          "ningun Compartir: seria el de otra publicacion del feed.",
+      ),
+      { webbotCode: "element_not_found" },
+    );
+  }
+
+  /**
+   * Comparte una publicacion que ya existe. Solo abre el camino que pasa por un composer, para
+   * que el resto —identidad, ensayo, tarjeta, recogida— sea exactamente el mismo que al publicar.
+   */
+  async function sharePost(
+    target: Target,
+    comment: string,
+    options: PostOptions & { expectedPost?: string },
+  ): Promise<Record<string, unknown>> {
+    const container = facebookPostContainer(findOne(target));
+    // Extracto de lo que se va a compartir: es lo que se comprueba y lo que se ensena en la tarjeta.
+    const sharing = visibleText(container).replace(/\s+/g, " ").trim().slice(0, 200);
+
+    /**
+     * Se comprueba ANTES de tocar nada, igual que la cuenta y por el mismo motivo: un feed se
+     * reordena solo, asi que entre el ensayo y la publicacion de verdad el mismo target puede
+     * haber pasado a apuntar a otra publicacion. Compartir la equivocada no se deshace.
+     */
+    if (!options.dryRun) {
+      if (!options.expectedPost) {
+        throw Object.assign(
+          new Error(
+            "Para compartir de verdad hay que indicar expectedPost. Lanza antes un dryRun: devuelve en " +
+              "'sharing' el extracto de la publicacion que se compartiria.",
+          ),
+          { webbotCode: "account_required" },
+        );
+      }
+      if (!norm(sharing).includes(norm(options.expectedPost).slice(0, 120))) {
+        throw Object.assign(
+          new Error(
+            `La publicacion que hay ahora bajo ese target no es la del ensayo. Se esperaba ` +
+              `${JSON.stringify(options.expectedPost.slice(0, 80))} y hay ${JSON.stringify(sharing.slice(0, 80))}. ` +
+              "No se ha compartido nada.",
+          ),
+          { webbotCode: "account_mismatch" },
+        );
+      }
+    }
+
+    const shareButton = buttonByName(SOCIAL.facebook.share.buttonNames, container);
+    if (!shareButton) {
+      throw Object.assign(
+        new Error("Esa publicacion no tiene boton de compartir visible: puede estar limitada por su autor."),
+        { webbotCode: "element_not_found" },
+      );
+    }
+
+    // El menu se reconoce por ser NUEVO, no por su titulo: el feed ya tiene menus abiertos suyos.
+    const antes = new Set(Array.from(document.querySelectorAll('[role="dialog"], [role="menu"]')));
+    dispatchClick(shareButton);
+    const menu = await until(
+      () =>
+        Array.from(document.querySelectorAll('[role="dialog"], [role="menu"]')).find(
+          (el) => !antes.has(el) && isVisible(el),
+        ) ?? null,
+      8_000,
+    );
+    if (!menu) {
+      throw Object.assign(new Error("El menu de compartir de Facebook no llego a abrirse."), {
+        webbotCode: "element_not_found",
+      });
+    }
+
+    const destino = optionByName(SOCIAL.facebook.share.toFeedNames, menu);
+    if (!destino) {
+      // Se dicen los destinos que SI hay: los nombres cambian con el idioma y con la version de
+      // Facebook, y leerlos aqui es lo que permite corregir el patron sin adivinar.
+      const ofrecidos = Array.from(menu.querySelectorAll('[role="button"], [role="menuitem"], button, a[href]'))
+        .filter((el) => isVisible(el) && accessibleName(el).trim())
+        .map((el) => accessibleName(el).trim())
+        .filter((name) => !SOCIAL.facebook.share.noise.some((pattern) => pattern.test(name)))
+        .slice(0, 20);
+      throw Object.assign(
+        new Error(
+          "No se reconocio ninguna opcion de compartir que abra un cuadro de publicacion. Facebook ofrece " +
+            `aqui: ${ofrecidos.join(" | ") || "nada reconocible"}.`,
+        ),
+        { webbotCode: "element_not_found" },
+      );
+    }
+
+    dispatchClick(destino);
+    const composer = await until(() => firstMatching(SOCIAL.facebook.composer), 10_000);
+    if (!composer) {
+      throw Object.assign(
+        new Error(
+          "Tras elegir el destino no se abrio ningun cuadro de publicacion. No se ha compartido nada, pero " +
+            "revisa la pestana por si quedo algo abierto.",
+        ),
+        { webbotCode: "composer_not_found" },
+      );
+    }
+
+    return publishFromComposer(composer, comment, options, { shared: true, sharing });
+  }
+
   async function postToFacebook(text: string, options: PostOptions): Promise<Record<string, unknown>> {
     let composer = firstMatching(SOCIAL.facebook.composer);
 
@@ -1085,6 +1240,23 @@ export function installWebbotRuntime(): void {
       }
     }
 
+    return publishFromComposer(composer, text, options);
+  }
+
+  /**
+   * De un composer abierto a la publicacion hecha. Lo comparten publicar y compartir: llegar al
+   * composer es lo unico que cambia entre los dos, y todo lo delicado —comprobar la identidad, el
+   * ensayo, el paso de dos pantallas, los grupos, la recogida— pasa de aqui para abajo.
+   *
+   * `extra` son los campos que solo tienen sentido en uno de los dos caminos, como que se estaba
+   * compartiendo.
+   */
+  async function publishFromComposer(
+    composer: Element,
+    text: string,
+    options: PostOptions,
+    extra: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
     /**
      * La identidad se comprueba con el composer ya abierto y antes de escribir nada: en el dialogo
      * esta el autor del post, y una pagina recien traida al frente puede no haber pintado todavia
@@ -1102,7 +1274,8 @@ export function installWebbotRuntime(): void {
       : [];
     checkAccount(account, options, accountAliases);
 
-    await writeComposer(composer, text, 600);
+    // Compartir sin comentario es no escribir nada, no escribir vacio.
+    if (text) await writeComposer(composer, text, 600);
     // Se describe el composer AQUI: si hay que avanzar de pantalla, Facebook se lleva el texto a
     // su propio estado y el elemento queda oculto y vacio, que es una foto enganosa del dryRun.
     const composerAtWrite = describeElement(composer);
@@ -1194,7 +1367,7 @@ export function installWebbotRuntime(): void {
     if (options.dryRun) {
       const found = { composer: composerAtWrite, button: describeElement(button), wrote: rawText(composer) };
       const tidied = await tidyAfterDryRun(composer, SOCIAL.facebook.closeNames, advancedStep);
-      return { network: "facebook", dryRun: true, posted: false, account, accountAliases, advancedStep, ...found, ...groups, tidied, text };
+      return { network: "facebook", dryRun: true, posted: false, account, accountAliases, advancedStep, ...found, ...groups, ...extra, tidied, text };
     }
 
     checkDeadline(options);
@@ -1207,7 +1380,7 @@ export function installWebbotRuntime(): void {
       return composer.isConnected && rawText(composer).length > 0 ? null : true;
     }, 15_000);
 
-    return { network: "facebook", dryRun: false, posted: true, confirmed: closed === true, account, accountAliases, ...groups, url: location.href, text };
+    return { network: "facebook", dryRun: false, posted: true, confirmed: closed === true, account, accountAliases, ...groups, ...extra, url: location.href, text };
   }
 
   // -------------------------------------------------------------------------
@@ -1358,6 +1531,15 @@ export function installWebbotRuntime(): void {
         });
       }
       return { found: describeElement(found), url: location.href };
+    },
+
+    async sharePost({ target, comment, dryRun, expectedAccount, expectedPost, deadlineAt }) {
+      if (document.visibilityState === "hidden") {
+        throw Object.assign(new Error("La pestana no esta visible. Traela al primer plano y reintenta."), {
+          webbotCode: "tab_hidden",
+        });
+      }
+      return sharePost(target, comment ?? "", { dryRun: dryRun ?? false, expectedAccount, expectedPost, deadlineAt });
     },
 
     async postSocial({ network, text, dryRun, expectedAccount, deadlineAt, groups }) {

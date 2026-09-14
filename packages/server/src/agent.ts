@@ -149,7 +149,11 @@ export function createAgentRunner(
   };
 
   /** Pide permiso al panel y espera. Devuelve false si el usuario dice que no o si se agota. */
-  const askConfirmation = (runId: string, run: Run, command: Command & { type: "social.post" }): Promise<boolean> =>
+  const askConfirmation = (
+    runId: string,
+    run: Run,
+    command: Command & { type: "social.post" | "social.share" },
+  ): Promise<boolean> =>
     new Promise<boolean>((resolve) => {
       const confirmId = `${runId}-${Date.now()}`;
       const timer = setTimeout(() => {
@@ -166,13 +170,16 @@ export function createAgentRunner(
           resolve(approved);
         },
       };
+      const compartida = command.type === "social.share";
       emit(runId, {
         type: "confirm",
         confirmId,
-        network: command.network,
-        text: command.text,
+        network: compartida ? "facebook" : command.network,
+        text: compartida ? (command.comment ?? "") : command.text,
         account: command.expectedAccount,
-        groups: command.groups,
+        groups: compartida ? undefined : command.groups,
+        // Sin esto la tarjeta diria solo 'publicar un texto vacio' al compartir sin comentario.
+        sharing: compartida ? command.expectedPost : undefined,
       });
     });
 
@@ -197,8 +204,8 @@ export function createAgentRunner(
     const command = entry.toCommand(parsed.data);
     emit(runId, { type: "tool", callId: call.id, name: call.name, input: parsed.data });
 
-    // Unica puerta manual: publicar de verdad es publico e irreversible.
-    if (command.type === "social.post" && command.dryRun !== true) {
+    // Unica puerta manual: sacar algo en publico es irreversible, se escriba o se comparta.
+    if ((command.type === "social.post" || command.type === "social.share") && command.dryRun !== true) {
       const approved = await askConfirmation(runId, run, command);
       if (!approved) {
         const detail = "La persona cancelo la publicacion desde el panel.";

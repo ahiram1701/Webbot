@@ -473,6 +473,116 @@ describe("compartir en grupos de Facebook", () => {
   });
 });
 
+describe("compartir una publicacion existente", () => {
+  /** Un feed con dos publicaciones, cada una con SU boton de compartir. */
+  function feedConDosPublicaciones(): { compartidos: string[] } {
+    const compartidos: string[] = [];
+    document.body.innerHTML = `
+      <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
+      <div role="article" data-testid="post-1">
+        <div>Un chiste sobre programadores</div>
+        <div role="button" aria-label="Compartir" data-testid="share-1">12</div>
+      </div>
+      <div role="article" data-testid="post-2">
+        <div>Una receta de lentejas</div>
+        <div role="button" aria-label="Compartir" data-testid="share-2">3</div>
+      </div>`;
+
+    for (const n of ["1", "2"]) {
+      document.querySelector(`[data-testid="share-${n}"]`)?.addEventListener("click", () => {
+        compartidos.push(n);
+        document.body.insertAdjacentHTML(
+          "beforeend",
+          `<div role="menu" data-testid="menu-${n}">
+             <div role="menuitem" aria-label="Compartir ahora (amigos)">ahora</div>
+             <div role="menuitem" aria-label="Compartir en el feed" data-testid="al-feed-${n}">al feed</div>
+             <div role="menuitem" aria-label="Copiar enlace">copiar</div>
+           </div>`,
+        );
+        document.querySelector(`[data-testid="al-feed-${n}"]`)?.addEventListener("click", () => {
+          document.body.insertAdjacentHTML(
+            "beforeend",
+            `<div role="dialog" aria-label="Compartir">
+               <div role="textbox" contenteditable="true"></div>
+               <div role="button" data-testid="publicar">Publicar</div>
+             </div>`,
+          );
+        });
+      });
+    }
+    return { compartidos };
+  }
+
+  it("pulsa el Compartir de SU publicacion, no el primero del feed", { timeout: 15_000 }, async () => {
+    const { compartidos } = feedConDosPublicaciones();
+
+    const result = (await api.sharePost({ target: { text: "lentejas" }, dryRun: true })) as {
+      sharing: string;
+      shared: boolean;
+    };
+
+    // El feed esta lleno de botones identicos: sin acotar se habria compartido el chiste.
+    expect(compartidos).toEqual(["2"]);
+    expect(result.shared).toBe(true);
+    expect(result.sharing).toContain("lentejas");
+  });
+
+  it("no usa 'Compartir ahora', que publicaria sin pasar por la tarjeta", { timeout: 15_000 }, async () => {
+    feedConDosPublicaciones();
+    const ahora = vi.fn();
+
+    await api.sharePost({ target: { text: "lentejas" }, dryRun: true });
+
+    document.querySelector('[aria-label="Compartir ahora (amigos)"]')?.addEventListener("click", ahora);
+    expect(ahora).not.toHaveBeenCalled();
+    // Y lo que se abrio fue un composer, que es donde el ensayo puede pararse.
+    expect(document.querySelector('[role="dialog"] [role="textbox"]')).not.toBeNull();
+  });
+
+  it("dice que destinos ofrece Facebook cuando no reconoce ninguno", { timeout: 15_000 }, async () => {
+    document.body.innerHTML = `
+      <div role="article">
+        <div>Un chiste</div>
+        <div role="button" aria-label="Compartir" data-testid="share">1</div>
+      </div>`;
+    document.querySelector('[data-testid="share"]')?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div role="menu">
+           <div role="menuitem" aria-label="Mandar a un chat">chat</div>
+           <div role="menuitem" aria-label="Copiar enlace">copiar</div>
+         </div>`,
+      );
+    });
+
+    // Los nombres cambian con el idioma y con la version: el error los lista para poder corregirlos
+    // sin tener que adivinar cual era.
+    await expect(api.sharePost({ target: { text: "chiste" }, dryRun: true })).rejects.toThrow(/Mandar a un chat/);
+  });
+
+  it("compartir de verdad exige el extracto del ensayo", { timeout: 15_000 }, async () => {
+    feedConDosPublicaciones();
+
+    await expect(
+      api.sharePost({ target: { text: "lentejas" }, expectedAccount: "Ahiram SG" }),
+    ).rejects.toMatchObject({ webbotCode: "account_required" });
+  });
+
+  it("aborta si bajo ese target hay ya otra publicacion", { timeout: 15_000 }, async () => {
+    // Un feed se reordena solo: entre el ensayo y la publicacion de verdad el mismo target puede
+    // estar apuntando a otra cosa, y compartir la equivocada no se deshace.
+    feedConDosPublicaciones();
+
+    await expect(
+      api.sharePost({
+        target: { text: "lentejas" },
+        expectedAccount: "Ahiram SG",
+        expectedPost: "Un chiste sobre programadores",
+      }),
+    ).rejects.toMatchObject({ webbotCode: "account_mismatch" });
+  });
+});
+
 describe("extract", () => {
   const PAGINA = `
     <nav>menu de navegacion</nav>

@@ -100,6 +100,22 @@ export const CommandSchema = z.discriminatedUnion("type", [
     groups: z.array(z.string()).optional().describe("Solo Facebook: grupos en los que compartir ademas del muro. Cada nombre selecciona como mucho uno."),
   }),
 
+  /** Compartir una publicacion que ya existe. Solo Facebook; X no tiene nada equivalente. */
+  z.object({
+    type: z.literal("social.share"),
+    tabId,
+    target: TargetSchema.describe("Algo dentro de la publicacion a compartir: su texto basta."),
+    comment: z.string().optional(),
+    dryRun: z.boolean().optional(),
+    expectedAccount: z.string().min(1).optional(),
+    /**
+     * Extracto de la publicacion, tal como lo devolvio el ensayo. Obligatorio para compartir de
+     * verdad y por el mismo motivo que expectedAccount: un feed se reordena solo, y el mismo
+     * target puede estar apuntando a otra publicacion un segundo despues.
+     */
+    expectedPost: z.string().min(1).optional(),
+  }),
+
   z.object({ type: z.literal("flow.list") }),
   z.object({ type: z.literal("flow.run"), name: z.string(), vars: z.record(z.string(), z.string()).optional() }),
   z.object({ type: z.literal("flow.save"), name: z.string(), steps: z.array(z.unknown()) }),
@@ -190,6 +206,8 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
      * "publicar en Facebook" sin saber que ademas sale en cinco grupos no es aprobarlo.
      */
     groups: z.array(z.string()).optional(),
+    /** Extracto de la publicacion ajena que se va a compartir, cuando se comparte una. */
+    sharing: z.string().optional(),
   }),
   z.object({ type: z.literal("done"), steps: z.number().int() }),
   z.object({ type: z.literal("error"), message: z.string(), code: z.string().optional() }),
@@ -303,6 +321,6 @@ export const SOCIAL_POST_TIMEOUT_MS = 90_000;
 
 /** Plazo que el servidor concede a un comando. */
 export function timeoutFor(command: Command, baseMs: number): number {
-  const canPost = command.type === "social.post" || command.type === "flow.run";
+  const canPost = command.type === "social.post" || command.type === "social.share" || command.type === "flow.run";
   return canPost ? Math.max(baseMs, SOCIAL_POST_TIMEOUT_MS) : baseMs;
 }

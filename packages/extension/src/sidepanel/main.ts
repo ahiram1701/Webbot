@@ -279,7 +279,11 @@ function confirmCard(entry: TranscriptEntry & { kind: "confirm" }): HTMLElement 
 
   const title = document.createElement("h2");
   // Compartir en grupos sale del muro: el titulo tiene que decirlo antes que nada.
-  title.textContent = entry.groups?.length ? "Publicar y compartir en grupos" : "Publicar de verdad";
+  title.textContent = entry.sharing
+    ? "Compartir una publicacion"
+    : entry.groups?.length
+      ? "Publicar y compartir en grupos"
+      : "Publicar de verdad";
   box.append(title);
 
   const list = document.createElement("dl");
@@ -289,6 +293,8 @@ function confirmCard(entry: TranscriptEntry & { kind: "confirm" }): HTMLElement 
   ];
   // Aprobar "publicar en Facebook" sin saber que ademas sale en cinco grupos no es aprobarlo.
   if (entry.groups?.length) rows.push(["Grupos", entry.groups.join(", ")]);
+  // Lo que se comparte es de otro: sin esto la tarjeta solo ensenaria tu comentario, o nada.
+  if (entry.sharing) rows.push(["Publicacion", entry.sharing]);
   for (const [label, value] of rows) {
     const dt = document.createElement("dt");
     dt.textContent = label;
@@ -298,10 +304,13 @@ function confirmCard(entry: TranscriptEntry & { kind: "confirm" }): HTMLElement 
   }
   box.append(list);
 
-  const quote = document.createElement("div");
-  quote.className = "quote";
-  quote.textContent = entry.text;
-  box.append(quote);
+  // Compartir sin comentario no tiene texto propio que citar, y un cuadro vacio confunde.
+  if (entry.text || !entry.sharing) {
+    const quote = document.createElement("div");
+    quote.className = "quote";
+    quote.textContent = entry.text || "(sin comentario)";
+    box.append(quote);
+  }
 
   if (entry.answered) {
     const answered = document.createElement("p");

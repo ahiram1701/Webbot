@@ -16,6 +16,7 @@ export type TranscriptEntry =
       text: string;
       account?: string;
       groups?: string[];
+      sharing?: string;
       answered?: boolean;
       approved?: boolean;
     }
@@ -61,6 +62,7 @@ export function applyEvent(transcript: TranscriptEntry[], event: AgentEvent): Tr
         text: event.text,
         account: event.account,
         groups: event.groups,
+        sharing: event.sharing,
       });
       return next;
     case "error":

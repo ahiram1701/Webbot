@@ -21,6 +21,7 @@ const SAMPLES: Record<string, unknown> = {
   webbot_type: { tabId: 7, target: { css: "input" }, text: "hola", submit: true },
   webbot_scroll: { tabId: 7, direction: "down" },
   webbot_post_social: { network: "x", text: "hola", dryRun: true },
+  webbot_share_post: { tabId: 7, target: { text: "un chiste" }, comment: "jaja", dryRun: true },
   webbot_flow_list: {},
   webbot_flow_run: { name: "buscar", vars: { tema: "zod" } },
 };

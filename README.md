@@ -320,6 +320,15 @@ de siempre —`dryRun` → tarjeta → publicar— porque publicar en un grupo e
 Abre el selector, no elige nada y devuelve en `groupsAvailable` los nombres exactos. Después se
 vuelve a pedir con los que se quieran, copiados tal cual.
 
+Facebook no pinta la lista entera de golpe: trae las primeras filas y el resto según se baja. Webbot
+hace ese scroll antes de mirar, porque contar solo lo que cupo en pantalla dejaba «comparte en todos
+mis grupos de software» en tres cuando había doce. Aun así `groupsAvailable` es **lo que Facebook
+llegó a ofrecer en esa pantalla**, no necesariamente todos los grupos de la cuenta.
+
+Si el selector no llega a abrirse, el error dice qué había en el diálogo en ese momento. No es
+cosmético: al otro lado solo llega el mensaje, y al fallar se recoge el borrador, así que después ya
+no queda nada que mirar.
+
 **Cada nombre selecciona como mucho un grupo.** `"memes"` podría encajar con cinco, y publicar en
 cinco sitios porque una palabra era ambigua no se puede deshacer.
 

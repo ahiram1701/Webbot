@@ -367,7 +367,37 @@ describe("compartir en grupos de Facebook", () => {
    *
    * Los nombres llegan con la coletilla de Facebook pegada detras, que es como los devuelve.
    */
-  function facebookConGrupos(grupos: string[]): { elegidos: string[] } {
+  /**
+   * Como se comporta el selector en esta variante. Facebook no lo pinta siempre igual y cada una de
+   * estas formas acababa en el mismo "la lista de grupos no llego a aparecer".
+   */
+  type FormaDelSelector = {
+    /** La lista sale en un dialogo NUEVO en vez de dentro del de configuracion. */
+    dialogoAparte?: boolean;
+    /** Rol de cada fila: en unas versiones es un boton y en otras una casilla. */
+    rolFila?: string;
+    /** El nombre lo lleva un contenedor sin manejador y el boton de verdad es un hijo suyo. */
+    openerEnvuelto?: boolean;
+    /** Botones propios del dialogo antes de la lista. */
+    ruido?: number;
+    /** Filas por tanda: la lista se carga a trozos segun se hace scroll. */
+    porTanda?: number;
+    /** Ademas de cargar a trozos, solo mantiene en el arbol las filas de la ventana visible. */
+    recicla?: boolean;
+    /** Pulsar la opcion no abre nada. */
+    sinLista?: boolean;
+  };
+
+  function facebookConGrupos(grupos: string[], forma: FormaDelSelector = {}): { elegidos: string[] } {
+    const {
+      dialogoAparte = false,
+      rolFila = "button",
+      openerEnvuelto = false,
+      ruido = 0,
+      porTanda = 0,
+      recicla = false,
+      sinLista = false,
+    } = forma;
     const elegidos: string[] = [];
     document.body.innerHTML = `
       <div role="navigation"><a href="https://www.facebook.com/Ahiram1701">Ahiram SG</a></div>
@@ -376,7 +406,18 @@ describe("compartir en grupos de Facebook", () => {
         <div role="button" data-testid="siguiente">Siguiente</div>
       </div>`;
 
+    const reclamo =
+      "Compartir en grupos Llega a mas personas cuando compartes tu publicacion en grupos relevantes.";
+
     document.querySelector('[data-testid="siguiente"]')?.addEventListener("click", () => {
+      // El nombre accesible puede llevarlo un contenedor y el manejador vivir en un hijo.
+      const opener = openerEnvuelto
+        ? `<div data-testid="abrir-grupos">${reclamo}<div role="button" data-testid="abrir-de-verdad"></div></div>`
+        : `<div role="button" data-testid="abrir-grupos">${reclamo}</div>`;
+      const relleno = Array.from(
+        { length: ruido },
+        (_, i) => `<div role="button" aria-label="Control ${i} del editor">c</div>`,
+      ).join("");
       document.body.insertAdjacentHTML(
         "beforeend",
         `<div role="dialog" aria-label="Configuracion" data-testid="ajustes">
@@ -384,29 +425,86 @@ describe("compartir en grupos de Facebook", () => {
            <div role="button" aria-label="Foto/video">foto</div>
            <div role="button" aria-label="Emoji">emoji</div>
            <div role="button" aria-label="Etiquetar personas">etiquetar</div>
+           ${relleno}
            <div role="button" data-testid="publicar">Publicar</div>
-           <div role="button" data-testid="abrir-grupos">Compartir en grupos Llega a mas personas cuando compartes tu publicacion en grupos relevantes.</div>
+           ${opener}
          </div>`,
       );
       const ajustes = document.querySelector('[data-testid="ajustes"]') as HTMLElement;
-      document.querySelector('[data-testid="abrir-grupos"]')?.addEventListener("click", () => {
-        ajustes.insertAdjacentHTML(
+
+      const abrirLista = (): void => {
+        let casa = ajustes;
+        if (dialogoAparte) {
+          document.body.insertAdjacentHTML(
+            "beforeend",
+            `<div role="dialog" aria-label="Elige grupos" data-testid="picker"></div>`,
+          );
+          casa = document.querySelector('[data-testid="picker"]') as HTMLElement;
+        }
+        casa.insertAdjacentHTML(
           "beforeend",
-          `<div data-testid="lista">${grupos
-            .map((nombre) => `<div role="button">${nombre} Tu ultima visita fue hace aproximadamente un mes</div>`)
-            .join("")}</div>
-           <div role="button" aria-label="Listo" data-testid="listo">Listo</div>`,
+          `<div data-testid="lista"></div><div role="button" aria-label="Listo" data-testid="listo">Listo</div>`,
         );
-        for (const boton of Array.from(ajustes.querySelectorAll('[data-testid="lista"] [role="button"]'))) {
-          boton.addEventListener("click", () => {
-            elegidos.push((boton.textContent ?? "").replace(/ Tu ultima visita.*$/, "").trim());
+        const lista = casa.querySelector('[data-testid="lista"]') as HTMLElement;
+        const fila = (nombre: string): string =>
+          `<div role="${rolFila}">${nombre} Tu ultima visita fue hace aproximadamente un mes</div>`;
+        const escuchar = (): void => {
+          for (const el of Array.from(lista.children)) {
+            if (el.hasAttribute("data-escuchando")) continue;
+            el.setAttribute("data-escuchando", "1");
+            el.addEventListener("click", () => {
+              elegidos.push((el.textContent ?? "").replace(/ Tu ultima visita.*$/, "").trim());
+            });
+          }
+        };
+
+        const tanda = porTanda || grupos.length;
+        let hasta = Math.min(tanda, grupos.length);
+        lista.insertAdjacentHTML("beforeend", grupos.slice(0, hasta).map(fila).join(""));
+        escuchar();
+
+        // Sin carga perezosa no hay contenedor con scroll: la lista ya esta entera.
+        if (porTanda) {
+          let top = 0;
+          Object.defineProperty(lista, "clientHeight", { configurable: true, value: 200 });
+          Object.defineProperty(lista, "scrollHeight", {
+            configurable: true,
+            get: () => 200 + grupos.length * 50,
+          });
+          Object.defineProperty(lista, "scrollTop", {
+            configurable: true,
+            get: () => top,
+            set: (valor: number) => {
+              top = valor;
+            },
+          });
+          lista.addEventListener("scroll", () => {
+            if (recicla) {
+              // Ventana movil: al subir del todo se vuelve a la primera tanda y las demas se van.
+              hasta = top === 0 ? Math.min(tanda, grupos.length) : Math.min(grupos.length, hasta + tanda);
+              const desde = top === 0 ? 0 : Math.max(0, hasta - tanda * 2);
+              lista.innerHTML = grupos.slice(desde, hasta).map(fila).join("");
+              escuchar();
+              return;
+            }
+            if (top === 0 || hasta >= grupos.length) return;
+            const previo = hasta;
+            hasta = Math.min(grupos.length, hasta + tanda);
+            lista.insertAdjacentHTML("beforeend", grupos.slice(previo, hasta).map(fila).join(""));
+            escuchar();
           });
         }
-        ajustes.querySelector('[data-testid="listo"]')?.addEventListener("click", () => {
-          ajustes.querySelector('[data-testid="lista"]')?.remove();
-          ajustes.querySelector('[data-testid="listo"]')?.remove();
+
+        casa.querySelector('[data-testid="listo"]')?.addEventListener("click", () => {
+          lista.remove();
+          casa.querySelector('[data-testid="listo"]')?.remove();
         });
-      });
+      };
+
+      const boton =
+        ajustes.querySelector('[data-testid="abrir-de-verdad"]') ??
+        ajustes.querySelector('[data-testid="abrir-grupos"]');
+      if (!sinLista) boton?.addEventListener("click", abrirLista);
     });
     return { elegidos };
   }
@@ -555,6 +653,117 @@ describe("compartir en grupos de Facebook", () => {
     // es el precio de no arriesgarse a pulsar la lupa creyendo que es un grupo.
     expect(result.groupsAvailable).toEqual(["Memes"]);
     expect(elegidos).toEqual(["Memes"]);
+  });
+
+  it("reconoce la lista aunque Facebook la pinte en otro dialogo", { timeout: 20_000 }, async () => {
+    // No siempre cae dentro del dialogo de configuracion. Buscarla solo ahi era no verla nunca.
+    const { elegidos } = facebookConGrupos(["Programadores", "Memes"], { dialogoAparte: true });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: ["Programadores"],
+    })) as { groupsMatched: string[]; groupsAvailable: string[] };
+
+    expect(result.groupsAvailable).toEqual(["Programadores", "Memes"]);
+    expect(result.groupsMatched).toEqual(["Programadores"]);
+    expect(elegidos).toEqual(["Programadores"]);
+  });
+
+  it("reconoce filas que son casillas y no botones", { timeout: 20_000 }, async () => {
+    const { elegidos } = facebookConGrupos(["Programadores", "Memes"], { rolFila: "checkbox" });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: ["Programadores"],
+    })) as { groupsMatched: string[] };
+
+    expect(result.groupsMatched).toEqual(["Programadores"]);
+    expect(elegidos).toEqual(["Programadores"]);
+  });
+
+  it("prueba otro sitio donde pulsar cuando el nombre lo lleva un contenedor", { timeout: 20_000 }, async () => {
+    // El clic burbujea hacia arriba, nunca hacia abajo: pulsar el contenedor no abria nada.
+    const { elegidos } = facebookConGrupos(["Programadores"], { openerEnvuelto: true });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: ["Programadores"],
+    })) as { groupsMatched: string[] };
+
+    expect(result.groupsMatched).toEqual(["Programadores"]);
+    expect(elegidos).toEqual(["Programadores"]);
+  });
+
+  it("no pierde los grupos cuando el dialogo ya trae decenas de botones", { timeout: 20_000 }, async () => {
+    // El recuento se cortaba en 40 ANTES de cribar por novedad: con 45 controles del editor por
+    // delante, los grupos quedaban fuera del recuento y la lista parecia no haber aparecido.
+    facebookConGrupos(["Programadores", "Memes"], { ruido: 45 });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: [],
+    })) as { groupsAvailable: string[] };
+
+    expect(result.groupsAvailable).toEqual(["Programadores", "Memes"]);
+  });
+
+  it("hace scroll para traer los grupos que Facebook aun no habia pintado", { timeout: 30_000 }, async () => {
+    // La lista llega a trozos: sin scroll, "todos mis grupos de software" se quedaba en los que
+    // cupieron en la primera pantalla, y el tope de 9 era inalcanzable teniendo veinte.
+    const todos = Array.from({ length: 20 }, (_, i) => `Software ${i + 1}`);
+    const { elegidos } = facebookConGrupos(todos, { porTanda: 8 });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: ["software"],
+      groupsMatchAll: true,
+    })) as { groupsAvailable: string[]; groupsMatched: string[]; groupsSkipped: string[] };
+
+    expect(result.groupsAvailable).toEqual(todos);
+    expect(result.groupsMatched).toHaveLength(9);
+    expect(elegidos).toHaveLength(9);
+    expect(result.groupsSkipped).toHaveLength(11);
+  });
+
+  it("vuelve a encontrar una fila que la lista habia reciclado", { timeout: 30_000 }, async () => {
+    // Una lista con ventana movil se lleva por delante las filas que no se ven. Pulsar el nodo
+    // guardado no habria hecho nada, y se habria contado como compartido igualmente.
+    const todos = Array.from({ length: 14 }, (_, i) => `Grupo ${i + 1}`);
+    const { elegidos } = facebookConGrupos(todos, { porTanda: 6, recicla: true });
+
+    const result = (await api.postSocial({
+      network: "facebook",
+      text: "hola",
+      dryRun: true,
+      groups: ["Grupo 13"],
+    })) as { groupsAvailable: string[]; groupsMatched: string[] };
+
+    expect(result.groupsAvailable).toEqual(todos);
+    expect(result.groupsMatched).toEqual(["Grupo 13"]);
+    expect(elegidos).toEqual(["Grupo 13"]);
+  });
+
+  it("cuenta que habia en pantalla cuando la lista no llega a aparecer", { timeout: 30_000 }, async () => {
+    // Al otro lado solo llega el mensaje: un fallo que no dice lo que vio obliga a ir a mirar la
+    // pagina a mano, y para entonces el ensayo ya ha recogido el dialogo.
+    facebookConGrupos(["Programadores"], { sinLista: true });
+
+    await expect(
+      api.postSocial({ network: "facebook", text: "hola", dryRun: true, groups: [] }),
+    ).rejects.toMatchObject({
+      webbotCode: "element_not_found",
+      message: expect.stringContaining('button "Publicar"'),
+    });
   });
 
   it("X no tiene grupos y lo dice en vez de ignorarlos", async () => {

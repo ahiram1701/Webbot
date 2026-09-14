@@ -42,7 +42,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 16;
+export const RUNTIME_VERSION = 17;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -55,7 +55,7 @@ export const RUNTIME_VERSION = 16;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 16;
+  const RUNTIME_VERSION_INNER = 17;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -110,7 +110,19 @@ export function installWebbotRuntime(): void {
         // Lo que no es un destino, para poder listar los que si cuando ninguno encaje.
         noise: [/^cerrar$/i, /^close$/i, /^buscar/i, /^search/i, /^copiar enlace/i, /^copy link/i],
       },
-      pickerNoise: [/^listo$/i, /^done$/i, /^hecho$/i, /^volver$/i, /^back$/i, /^atr[aá]s$/i, /^cerrar$/i, /^close$/i, /^buscar/i, /^search/i, /^eliminar/i, /^remove/i, /^quitar/i],
+      pickerNoise: [
+        /^listo$/i, /^done$/i, /^hecho$/i, /^volver$/i, /^back$/i, /^atr[aá]s$/i, /^cerrar$/i, /^close$/i,
+        /^buscar/i, /^search/i, /^eliminar/i, /^remove/i, /^quitar/i,
+        // Lo que el propio selector puede repintar al abrirse: aparece como "nuevo" sin ser un grupo.
+        /^publicar$/i, /^post$/i, /^siguiente$/i, /^next$/i, /^foto\/video$/i, /^photo\/video$/i,
+        /^compartir en grupos/i, /^share (to|in) groups/i,
+      ],
+      /**
+       * Una fila de grupo no siempre es un boton: con casilla es un checkbox, y en algunas
+       * versiones del selector es una opcion de lista. Buscarla solo como boton era no verla.
+       */
+      pickerRows:
+        '[role="button"], button, [role="checkbox"], [role="menuitemcheckbox"], [role="option"], [role="switch"]',
       // El composer saluda a quien publica: "¿Qué estás pensando, Impulsa CV?". Si la sesion actua
       // como una pagina, ese nombre es el de la pagina y no el del perfil personal.
       accountInPrompt: [/pensando,\s*(.+?)\s*\?\s*$/i, /on your mind,\s*(.+?)\s*\?\s*$/i],
@@ -255,6 +267,8 @@ export function installWebbotRuntime(): void {
   const SNAPSHOT_LIMIT = 300;
   /** Lo que Facebook admite por publicacion. Pedir mas no anade ninguno, los pierde. */
   const GROUPS_MAX = 9;
+  /** Tope de filas que se miran en el selector. No es el de publicacion: es para no barrer el DOM entero. */
+  const GROUPS_SCAN_MAX = 120;
   /** Cuantos cambios se cuentan uno a uno antes de resumir el resto. */
   const DIFF_LIMIT = 15;
   const DIALOG_SELECTOR = '[aria-modal="true"], [role="dialog"], [role="alertdialog"], dialog[open]';
@@ -1024,16 +1038,137 @@ export function installWebbotRuntime(): void {
   function groupCandidates(picker: ParentNode): Element[] {
     const vistos = new Set<string>();
     const found: Element[] = [];
-    for (const el of Array.from(picker.querySelectorAll('[role="button"], button'))) {
+    for (const el of Array.from(picker.querySelectorAll(SOCIAL.facebook.pickerRows))) {
       if (!isVisible(el)) continue;
       const name = accessibleName(el).trim();
       if (!name || vistos.has(name)) continue;
       if (SOCIAL.facebook.pickerNoise.some((pattern) => pattern.test(name))) continue;
       vistos.add(name);
       found.push(el);
-      if (found.length >= 40) break;
+      /**
+       * Tope de seguridad, no de resultados. Antes se cortaba en 40 AQUI, y como la criba de
+       * novedad viene despues, un dialogo que ya traia cuarenta botones suyos escondia la lista
+       * entera: se buscaban los grupos entre los cuarenta primeros, donde no habia ninguno.
+       */
+      if (found.length >= 400) break;
     }
     return found;
+  }
+
+  /**
+   * Por donde se puede pulsar una opcion cuando el nombre lo lleva un contenedor. El clic burbujea
+   * hacia ARRIBA y nunca hacia abajo: si el manejador vive en un hijo —y en Facebook el nombre que
+   * encaja es el del reclamo entero, que suele ser el de la seccion y no el del boton— pulsar el
+   * nodo que encajo no hace absolutamente nada.
+   */
+  function clickTargets(el: Element): Element[] {
+    const targets: Element[] = [];
+    const add = (candidate: Element | null | undefined): void => {
+      if (candidate && isVisible(candidate) && !targets.includes(candidate)) targets.push(candidate);
+    };
+    add(el.closest('[role="button"], button'));
+    add(el);
+    for (const child of Array.from(el.querySelectorAll('[role="button"], button, [role="switch"], a[href]'))) {
+      if (targets.length >= 6) break;
+      add(child);
+    }
+    return targets;
+  }
+
+  /**
+   * Lo que hay en pantalla, en una linea. Va dentro del mensaje de los fallos del selector: al otro
+   * lado solo llegan 'message' y 'code', asi que un fallo que no se cuenta a si mismo obliga a ir a
+   * mirar la pagina a mano, y para entonces el dialogo ya se ha recogido.
+   */
+  function visibleControls(scope: ParentNode, limit = 20): string {
+    const vistos = new Set<string>();
+    const lineas: string[] = [];
+    for (const el of Array.from(scope.querySelectorAll(SOCIAL.facebook.pickerRows))) {
+      if (!isVisible(el)) continue;
+      const name = accessibleName(el).trim();
+      if (!name || vistos.has(name)) continue;
+      vistos.add(name);
+      lineas.push(`${roleOf(el)} "${name.slice(0, 60)}"`);
+      if (lineas.length >= limit) break;
+    }
+    return lineas.join(" | ") || "nada visible";
+  }
+
+  /**
+   * Facebook pinta las primeras filas del selector y trae el resto al hacer scroll. Sin esto
+   * 'groupsAvailable' solo cuenta lo que cupo en pantalla, y pedir "comparte en todos mis grupos de
+   * software" no podia llegar al tope aunque hubiera veinte: los demas ni estaban en el arbol.
+   */
+  async function loadLazyRows(
+    firstRow: Element,
+    rows: () => Element[],
+  ): Promise<{ rows: Element[]; scroller: HTMLElement | null }> {
+    let scroller: HTMLElement | null = null;
+    for (let el = firstRow.parentElement; el; el = el.parentElement) {
+      if (el.scrollHeight - el.clientHeight > 8) {
+        scroller = el;
+        break;
+      }
+      if (el.getAttribute("role") === "dialog") break;
+    }
+    /**
+     * Se acumula lo visto en cada ronda en vez de recontar al final: una lista que recicla filas
+     * borra las de arriba al bajar, asi que al terminar el recuento habria perdido justo las que se
+     * habian conseguido cargar.
+     */
+    const acumulado = new Map<string, Element>();
+    const recoger = (): number => {
+      for (const el of rows()) acumulado.set(groupLabel(el), el);
+      return acumulado.size;
+    };
+    recoger();
+    // Sin contenedor con scroll no hay nada que cargar: lo que se ve es todo lo que hay.
+    if (!scroller) return { rows: [...acumulado.values()], scroller: null };
+
+    let previo = acumulado.size;
+    let quietas = 0;
+    for (let ronda = 0; ronda < 10 && quietas < 2 && previo < GROUPS_SCAN_MAX; ronda += 1) {
+      scroller.scrollTop += Math.max(scroller.clientHeight, 200);
+      // El evento se despacha a mano: asignar scrollTop no siempre lo dispara, y es la senal que
+      // escucha quien carga el siguiente tramo.
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await sleep(500);
+      const ahora = recoger();
+      quietas = ahora > previo ? 0 : quietas + 1;
+      previo = ahora;
+    }
+    // Se vuelve arriba: elegir deja la lista donde este, y la persona la ve como la abrio.
+    scroller.scrollTop = 0;
+    scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await sleep(300);
+    return { rows: [...acumulado.values()], scroller };
+  }
+
+  /**
+   * Vuelve a encontrar una fila por su nombre. Solo hace falta cuando la lista recicla filas: la
+   * que se guardo al leerla ya no esta en el arbol, y hay que traerla de vuelta a base de scroll
+   * antes de pulsarla.
+   */
+  async function findRow(
+    label: string,
+    rows: () => Element[],
+    scroller: HTMLElement | null,
+  ): Promise<Element | null> {
+    const aqui = (): Element | null => rows().find((el) => groupLabel(el) === label) ?? null;
+    const ya = aqui();
+    if (ya || !scroller) return ya;
+
+    scroller.scrollTop = 0;
+    scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await sleep(300);
+    for (let i = 0; i < 12; i += 1) {
+      const hit = aqui();
+      if (hit) return hit;
+      scroller.scrollTop += Math.max(scroller.clientHeight, 200);
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await sleep(300);
+    }
+    return aqui();
   }
 
   /**
@@ -1041,46 +1176,82 @@ export function installWebbotRuntime(): void {
    * COMO MUCHO UN grupo: 'memes' podria encajar con cinco, y publicar en cinco sitios porque una
    * palabra era ambigua no es una sorpresa que se pueda deshacer. Los demas se devuelven en
    * 'groupsAvailable' para que quien pida pueda nombrarlos uno a uno si los quiere.
+   *
+   * 'home' es la pantalla donde vive "Publicar", y acota donde se busca la opcion.
    */
-  async function selectFacebookGroups(wanted: string[], matchAll = false): Promise<Record<string, unknown>> {
-    const opener = buttonByName(SOCIAL.facebook.shareToGroupsNames);
+  async function selectFacebookGroups(
+    wanted: string[],
+    matchAll = false,
+    home: ParentNode = document,
+  ): Promise<Record<string, unknown>> {
+    /**
+     * La opcion se busca PRIMERO en la pantalla de esta publicacion. Buscarla en el documento
+     * entero encontraba cualquier "Compartir en grupos" suelto por la pagina —el feed esta lleno—
+     * y entonces se pulsaba algo que no abria ninguna lista: ocho segundos esperando a que se
+     * abriera una lista que nadie habia abierto.
+     */
+    const opener =
+      buttonByName(SOCIAL.facebook.shareToGroupsNames, home) ??
+      buttonByName(SOCIAL.facebook.shareToGroupsNames);
     if (!opener) {
       throw Object.assign(
         new Error(
           "No aparece la opcion 'Compartir en grupos' en esta publicacion. Facebook no la ofrece siempre: " +
-            "depende del tipo de publicacion y de si tienes grupos donde puedas publicar.",
+            "depende del tipo de publicacion y de si tienes grupos donde puedas publicar. Lo que si hay: " +
+            visibleControls(home),
         ),
         { webbotCode: "element_not_found" },
       );
     }
     /**
-     * La lista sale DENTRO del mismo dialogo de configuracion: Facebook no abre otro. Esperar a que
-     * apareciera un dialogo nuevo dejaba esto colgado hasta agotar el plazo, y era justo por lo que
-     * el unico camino que funcionaba acababa siendo ir a mano, saltandose la tarjeta.
-     *
-     * Los grupos se reconocen por ser NUEVOS: lo que no estaba antes de pulsar es de la lista. Asi
-     * no hay que distinguir un grupo de un "Foto/video" por su nombre, que era la otra forma de
-     * fallar: la lista de disponibles venia llena de controles del editor.
+     * La lista suele salir DENTRO del mismo dialogo de configuracion, pero no hace falta creerselo:
+     * se mira el documento entero. Lo que distingue a un grupo no es donde esta, sino ser NUEVO: lo
+     * que no estaba antes de pulsar es de la lista. Asi da igual que Facebook la pinte en otro
+     * dialogo, y tampoco hay que distinguir un grupo de un "Foto/video" por su nombre, que era la
+     * otra forma de fallar: la lista de disponibles venia llena de controles del editor.
      */
-    const scope: ParentNode = opener.closest('[role="dialog"]') ?? document;
-    const antes = new Set(groupCandidates(scope).map((el) => accessibleName(el).trim()));
-    dispatchClick(opener);
-
+    const antes = new Set(groupCandidates(document).map((el) => accessibleName(el).trim()));
     const nuevos = (): Element[] =>
-      groupCandidates(scope).filter((el) => !antes.has(accessibleName(el).trim()));
-    const candidates = await until(() => {
-      const found = nuevos();
-      return found.length > 0 ? found : null;
-    }, 8_000);
+      groupCandidates(document).filter((el) => !antes.has(accessibleName(el).trim()));
+
+    /**
+     * Se prueban por orden los sitios por los que se puede pulsar la opcion, y al primero se le da
+     * un plazo corto: si el nombre lo llevaba un contenedor sin manejador, el clic no hace nada, y
+     * agotar ahi el plazo largo solo retrasa el intento que si funciona.
+     */
+    const targets = clickTargets(opener);
+    let candidates: Element[] | null = null;
+    for (let i = 0; i < targets.length && !candidates; i += 1) {
+      const target = targets[i];
+      if (!target) continue;
+      dispatchClick(target);
+      const ultimo = i === targets.length - 1;
+      candidates = await until(() => {
+        const found = nuevos();
+        return found.length > 0 ? found : null;
+      }, ultimo ? 8_000 : 2_000);
+    }
     if (!candidates) {
       throw Object.assign(
         new Error(
           "La lista de grupos no llego a aparecer tras pulsar 'Compartir en grupos'. Puede que esta " +
-            "publicacion no admita compartirse en grupos.",
+            "publicacion no admita compartirse en grupos. Lo que habia en pantalla tras pulsar: " +
+            visibleControls(opener.closest('[role="dialog"]') ?? home),
         ),
         { webbotCode: "element_not_found" },
       );
     }
+
+    /**
+     * La lista viene a trozos y se termina de cargar ANTES de mirar que hay: contar solo las filas
+     * que cupieron en pantalla es lo que hacia que "comparte en todos mis grupos de software" se
+     * quedara en tres cuando habia doce.
+     */
+    // La lista no esta vacia aqui: 'opener' solo cubre el tipo, nunca llega a usarse.
+    const primeraFila = candidates[0] ?? opener;
+    const listHome: ParentNode = primeraFila.closest('[role="dialog"]') ?? home;
+    const { rows: todas, scroller } = await loadLazyRows(primeraFila, nuevos);
+    candidates = todas.slice(0, GROUPS_SCAN_MAX);
 
     const groupsAvailable = candidates.map(groupLabel);
     const groupsMatched: string[] = [];
@@ -1117,7 +1288,17 @@ export function installWebbotRuntime(): void {
           anotarDescartado(label);
           continue;
         }
-        dispatchClick(hit);
+        /**
+         * La fila que se guardo puede estar ya fuera del arbol: al hacer scroll, una lista que
+         * recicla filas se lleva por delante las que no se ven. Pulsar un nodo desconectado no
+         * hace nada y se habria contado como elegido, que es la peor forma de fallar aqui.
+         */
+        const vigente = hit.isConnected ? hit : await findRow(label, nuevos, scroller);
+        if (!vigente) {
+          anotarDescartado(label);
+          continue;
+        }
+        dispatchClick(vigente);
         groupsMatched.push(label);
         await sleep(350);
       }
@@ -1129,7 +1310,7 @@ export function installWebbotRuntime(): void {
 
     // Confirmar. El dialogo no se cierra —la lista vivia dentro—, asi que la senal es que la lista
     // se vaya, no que desaparezca nada.
-    const done = buttonByName(SOCIAL.facebook.doneNames, scope);
+    const done = buttonByName(SOCIAL.facebook.doneNames, listHome);
     if (done) {
       dispatchClick(done);
       await until(() => (nuevos().length === 0 ? true : null), 5_000);
@@ -1429,7 +1610,18 @@ export function installWebbotRuntime(): void {
     // Con la lista vacia se abre el selector, se mira que hay y no se elige nada: es la unica
     // forma de enterarse de los nombres, y antes hacia falta acertar uno para que te los dijeran.
     if (options.groups) {
-      groups = await selectFacebookGroups(options.groups, options.groupsMatchAll ?? false);
+      const groupsHome: ParentNode = button.closest('[role="dialog"]') ?? scope;
+      try {
+        groups = await selectFacebookGroups(options.groups, options.groupsMatchAll ?? false, groupsHome);
+      } catch (error) {
+        /**
+         * Fallar eligiendo grupos dejaba el dialogo abierto con el texto escrito, que es justo lo
+         * que el ensayo promete no dejar: el siguiente intento empezaba encima de esos restos. Aqui
+         * todavia no se ha pulsado Publicar, asi que se recoge y se cuenta el fallo.
+         */
+        await tidyAfterDryRun(composer, SOCIAL.facebook.closeNames, advancedStep);
+        throw error;
+      }
       button = await findPublish(8_000);
       if (!button) {
         throw Object.assign(new Error("Tras elegir los grupos no volvio a aparecer un boton 'Publicar' habilitado."), {

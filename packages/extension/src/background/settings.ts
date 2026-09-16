@@ -1,4 +1,4 @@
-import { DEFAULT_BRIDGE_PORT, type Flow, type LlmChoice, type RequestOrigin } from "@webbot/shared";
+import { DEFAULT_BRIDGE_PORT, LlmChoiceSchema, type Flow, type LlmChoice, type RequestOrigin } from "@webbot/shared";
 
 export interface WebbotSettings {
   /** Debe coincidir con WEBBOT_TOKEN del servidor. Sin el, el puente rechaza la conexion. */
@@ -40,7 +40,10 @@ export async function getSettings(): Promise<WebbotSettings> {
     bridgePort: typeof stored.bridgePort === "number" ? stored.bridgePort : DEFAULT_BRIDGE_PORT,
     allowlist: Array.isArray(stored.allowlist) ? (stored.allowlist as string[]) : DEFAULT_SETTINGS.allowlist,
     flows: (stored.flows as Record<string, Flow>) ?? {},
-    llm: (stored.llm as LlmChoice | null) ?? null,
+    // Se valida en vez de castear: un `llm` con forma vieja o corrupta no deja al panel "sin
+    // modelo", deja a la extension SIN CONECTAR, porque el hello entero no pasa el esquema y el
+    // servidor lo descarta en silencio. Mejor volver al .env que quedarse fuera.
+    llm: LlmChoiceSchema.safeParse(stored.llm).data ?? null,
     autoPublish: stored.autoPublish === true,
   };
 }

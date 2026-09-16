@@ -2,6 +2,7 @@ import { ErrorCodes, type LlmStatus, type PanelContext } from "@webbot/shared";
 
 import { activeTab } from "../background/activeTab.js";
 import { PANEL_PORT, type PanelMessage, type PanelUpdate } from "../background/agent.js";
+import { llmLabel } from "../background/llm.js";
 import {
   ACTION_LOG_KEY,
   ACTION_LOG_LIMIT,
@@ -59,7 +60,8 @@ async function renderStatus(): Promise<void> {
 
   const allow = settings.allowlist.includes("*") ? "todos los dominios" : `${settings.allowlist.length} dominio(s)`;
   // Un servidor viejo no manda `llm`: mejor no decir nada que inventarse que no hay modelo.
-  const modelo = llm === null ? "" : llm.ready ? ` - ${llm.model ?? "modelo sin nombre"}` : " - sin modelo";
+  const label = llmLabel(llm);
+  const modelo = label === null ? "" : ` - ${label}`;
   $("detail").textContent = connected
     ? `127.0.0.1:${settings.bridgePort} - ${allow}${modelo}`
     : String(session.connectionDetail ?? "");

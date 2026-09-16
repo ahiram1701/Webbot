@@ -85,6 +85,16 @@
       .warn {
         color: var(--warn);
       }
+      /* Con que modelo se quedo el servidor de verdad: sin esto, una eleccion que no cuaja solo se
+         descubria mandando un mensaje al panel y viendolo fallar. */
+      #inuse {
+        margin: 12px 0 0;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+      #inuse:empty {
+        display: none;
+      }
       .bar {
         display: flex;
         align-items: center;
@@ -174,16 +184,25 @@
 
       <label for="model">Modelo</label>
       <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="claude-opus-5" />
-      <p class="hint">Tiene que soportar tool calling o el agente no podra hacer nada.</p>
+      <p class="hint">
+        Tiene que soportar tool calling o el agente no podra hacer nada. Cada campo de este bloque
+        que dejes vacio lo sigue poniendo el <code>.env</code> del servidor, asi que puedes cambiar
+        solo el modelo sin repetir el proveedor ni la URL base.
+      </p>
 
       <label for="baseUrl">URL base (solo openai)</label>
-      <input id="baseUrl" type="text" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1" />
+      <input id="baseUrl" type="text" autocomplete="off" spellcheck="false" placeholder="lo que diga WEBBOT_LLM_BASE_URL" />
       <p class="hint">
         Para OpenRouter, Groq, NVIDIA NIM, Ollama... El formato <code>/chat/completions</code> lo
         hablan casi todos.
       </p>
 
-      <label class="check"><input id="vision" type="checkbox" /> Mandarle las capturas de pantalla</label>
+      <label for="vision">Mandarle las capturas de pantalla</label>
+      <select id="vision">
+        <option value="">Lo que diga el .env del servidor</option>
+        <option value="on">Si</option>
+        <option value="off">No</option>
+      </select>
       <p class="hint">
         Solo con un modelo que vea imagenes. La mayoria de los que se enchufan por
         <code>/chat/completions</code> son de solo texto y devuelven un error al recibir una.
@@ -195,6 +214,8 @@
         <code>OPENAI_API_KEY</code> segun el proveedor). No se guarda aqui a proposito: el
         almacenamiento de la extension lo lee cualquiera con acceso a este perfil de Chrome.
       </p>
+
+      <p class="hint" id="inuse"></p>
     </fieldset>
     <fieldset>
       <legend>Al publicar</legend>

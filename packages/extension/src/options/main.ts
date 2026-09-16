@@ -1,5 +1,6 @@
-import { FlowSchema, type Flow, type LlmChoice } from "@webbot/shared";
+import { FlowSchema, type Flow, type LlmChoice, type LlmStatus } from "@webbot/shared";
 
+import { llmLabel, readLlmStatus } from "../background/llm.js";
 import { DEFAULT_SETTINGS, getSettings, saveSettings } from "../background/settings.js";
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -15,9 +16,10 @@ const flowsInput = $<HTMLTextAreaElement>("flows");
 const providerInput = $<HTMLSelectElement>("provider");
 const modelInput = $<HTMLInputElement>("model");
 const baseUrlInput = $<HTMLInputElement>("baseUrl");
-const visionInput = $<HTMLInputElement>("vision");
+const visionInput = $<HTMLSelectElement>("vision");
 const autoPublishInput = $<HTMLInputElement>("autoPublish");
 const status = $("status");
+const inUse = $("inuse");
 
 function say(message: string, isError = false): void {
   status.textContent = message;
@@ -34,24 +36,54 @@ async function load(): Promise<void> {
   providerInput.value = settings.llm?.provider ?? "";
   modelInput.value = settings.llm?.model ?? "";
   baseUrlInput.value = settings.llm?.baseUrl ?? "";
-  visionInput.checked = settings.llm?.vision ?? false;
+  // Tres estados, no dos: "" es no opinar y dejar que mande el .env.
+  visionInput.value = settings.llm?.vision === undefined ? "" : settings.llm.vision ? "on" : "off";
   autoPublishInput.checked = settings.autoPublish;
 }
 
 /**
- * Sin proveedor o sin modelo se devuelve null, que significa 'manda el .env del servidor'. Es
- * mejor eso que guardar media eleccion y dejar al panel sin modelo sin haberlo pedido.
+ * Lo que se escribe aqui es un parche sobre el .env del servidor, campo a campo: cada hueco lo
+ * rellena el. Solo cuando no hay ni un campo puesto se devuelve null, que es "manda el .env entero".
+ *
+ * Antes hacia falta proveedor Y modelo o se descartaba la eleccion completa sin decirlo, asi que
+ * cambiar solo el modelo se guardaba como "nada" y el panel seguia con el de siempre.
  */
 function parseChoice(): LlmChoice | null {
-  const provider = providerInput.value.trim();
+  const crudo = providerInput.value.trim();
+  const provider = crudo === "anthropic" || crudo === "openai" ? crudo : undefined;
+  if (crudo && !provider) throw new Error(`Proveedor desconocido: ${crudo}.`);
   const model = modelInput.value.trim();
-  if (!provider || !model) return null;
-  if (provider !== "anthropic" && provider !== "openai") throw new Error(`Proveedor desconocido: ${provider}.`);
   const baseUrl = baseUrlInput.value.trim();
+  const vision = visionInput.value;
+  // Solo se protesta si anthropic se eligio a proposito: con el select vacio y un .env de openai,
+  // poner una URL base es justo lo que hay que hacer.
   if (provider === "anthropic" && baseUrl) {
     throw new Error("La URL base solo se usa con el proveedor openai; con anthropic dejala vacia.");
   }
-  return { provider, model, ...(baseUrl ? { baseUrl } : {}), vision: visionInput.checked };
+  const choice: LlmChoice = {
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(vision ? { vision: vision === "on" } : {}),
+  };
+  return Object.keys(choice).length > 0 ? choice : null;
+}
+
+/**
+ * Con que modelo se quedo el servidor de verdad. Se pinta aqui, al lado de donde se elige, porque
+ * una eleccion que no cuaja (un modelo que no existe, una clave que no va con el proveedor) solo se
+ * descubria mandando un mensaje al panel y viendolo fallar.
+ */
+function renderInUse(llm: LlmStatus | null): void {
+  if (llm === null) {
+    inUse.textContent = "Sin conectar al servidor: no se sabe que modelo esta en uso.";
+    inUse.classList.remove("warn");
+    return;
+  }
+  inUse.textContent = llm.ready
+    ? `En uso ahora mismo: ${llmLabel(llm)}.`
+    : `El panel se ha quedado sin modelo: ${llm.reason ?? ""}`;
+  inUse.classList.toggle("warn", !llm.ready);
 }
 
 /** Valida los flujos uno a uno para poder decir cual falla, no solo que "el JSON esta mal". */
@@ -124,4 +156,12 @@ $("reset").addEventListener("click", async () => {
   say("Valores por defecto restaurados (el token se conserva).");
 });
 
+// El welcome llega despues de que termine la reconexion, asi que leer el modelo justo tras guardar
+// daria el anterior. Se espera a que el service worker lo deje en session y se repinta entonces.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "session" || !("llm" in changes)) return;
+  renderInUse((changes.llm.newValue as LlmStatus | null) ?? null);
+});
+
 void load();
+void readLlmStatus().then(renderInUse);

@@ -161,10 +161,17 @@ export type LlmStatus = z.infer<typeof LlmStatusSchema>;
  * proposito: vive solo en el .env, porque chrome.storage.local lo lee cualquiera con acceso al
  * perfil y ademas tendria que viajar por el puente. El servidor empareja la eleccion con la clave
  * que ya tiene para ese proveedor.
+ *
+ * Todos los campos son opcionales porque esto es un PARCHE sobre el .env, no una configuracion
+ * entera: lo que se omite lo sigue poniendo el servidor. Asi se puede cambiar solo el modelo sin
+ * repetir el proveedor y la URL base que ya estaban bien, que era la forma facil de quedarse sin
+ * ellos. La herencia solo vale dentro del mismo proveedor: la URL de un endpoint compatible no
+ * significa nada para el otro adaptador.
  */
 export const LlmChoiceSchema = z.object({
-  provider: z.enum(["anthropic", "openai"]),
-  model: z.string().min(1),
+  provider: z.enum(["anthropic", "openai"]).optional(),
+  model: z.string().min(1).optional(),
+
   baseUrl: z.string().optional().describe("Solo para openai: el endpoint compatible."),
   vision: z.boolean().optional(),
   thinking: z.boolean().optional(),

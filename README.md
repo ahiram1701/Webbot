@@ -153,8 +153,15 @@ plano**, porque `captureVisibleTab` solo fotografía la pestaña activa.
 ### Cambiarlo sin tocar el `.env`
 
 La página de **Opciones** de la extensión elige proveedor, modelo, URL base y visión para el panel.
-Lo que se ponga ahí gana al `.env`; dejarlo vacío devuelve el mando al `.env`. Es la forma barata de
-comparar modelos en la misma tarea, que es justo lo que hay que hacer cuando el agente parece torpe.
+Es la forma barata de comparar modelos en la misma tarea, que es justo lo que hay que hacer cuando
+el agente parece torpe.
+
+Lo de ahí es un **parche sobre el `.env`, campo a campo**: cada hueco que dejes lo sigue poniendo el
+servidor. Así se puede cambiar solo el modelo sin repetir el proveedor ni la URL base, que era la
+forma fácil de perderlos —elegir `openai` y dejar la URL vacía mandaba las peticiones a
+`api.openai.com` con la clave de otro sitio—. La herencia solo vale **dentro del mismo proveedor**:
+si cambias de `openai` a `anthropic`, la URL base y el modelo del `.env` ya no hablan de lo que has
+elegido, así que no se heredan. Con todos los campos vacíos manda el `.env` entero.
 
 **La clave de API no se configura ahí, a propósito.** Sigue viviendo solo en el `.env` del servidor,
 que la empareja con el proveedor elegido (`WEBBOT_LLM_API_KEY`, o `ANTHROPIC_API_KEY` /
@@ -165,6 +172,11 @@ La elección viaja en el `hello`, no en una trama aparte, porque el servidor tie
 aplicado **antes** de contestar el `welcome`, que es donde anuncia con qué modelo se quedó. Cambiarla
 reconecta, y eso también resuelve lo que hacer con una conversación a medias: el historial lo guarda
 cada adaptador en su formato nativo y no es portable, así que **cambiar de modelo empieza de cero**.
+
+Bajo el bloque de Opciones hay una línea que dice **con qué modelo se quedó el servidor de verdad**,
+la misma que sale en la cabecera del panel. Es donde se ve si la elección cuajó: sin ella, un modelo
+que no existe o una clave que no va con el proveedor solo se descubrían mandando un mensaje al panel
+y viéndolo fallar.
 
 ### Qué te va a preguntar
 

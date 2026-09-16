@@ -58,32 +58,53 @@ export function apiKeyFor(provider: "anthropic" | "openai"): string {
 /** Techo por turno, comun a cualquier modelo: no cambia porque se elija otro desde Opciones. */
 export const llmTimeoutMs = intFromEnv("WEBBOT_LLM_TIMEOUT_MS", 180_000);
 
-function llmConfig(): LlmConfig | null {
-  const provider = process.env.WEBBOT_LLM_PROVIDER?.trim().toLowerCase() || "anthropic";
-  if (provider !== "anthropic" && provider !== "openai") {
-    log(`WEBBOT_LLM_PROVIDER='${provider}' no existe: usa 'anthropic' u 'openai'. El panel se queda sin agente.`);
-    return null;
+/**
+ * Lo que dice el .env del modelo, tal cual, sin exigir que este completo. Va aparte de llmConfig()
+ * porque lo que elige Opciones es un parche sobre esto: hace falta poder heredar la URL base o la
+ * vision aunque falte el modelo, y llmConfig() en ese caso devuelve null y se los lleva por delante.
+ */
+export interface LlmEnv {
+  /** null si WEBBOT_LLM_PROVIDER trae algo que no existe. */
+  provider: "anthropic" | "openai" | null;
+  model: string;
+  baseUrl: string;
+  thinking: boolean;
+  vision: boolean;
+}
+
+function readLlmEnv(): LlmEnv {
+  const raw = process.env.WEBBOT_LLM_PROVIDER?.trim().toLowerCase() || "anthropic";
+  const valido = raw === "anthropic" || raw === "openai";
+  if (!valido) {
+    log(`WEBBOT_LLM_PROVIDER='${raw}' no existe: usa 'anthropic' u 'openai'. El panel se queda sin agente.`);
   }
+  const provider = valido ? raw : null;
+  return {
+    provider,
+    model: process.env.WEBBOT_LLM_MODEL?.trim() || (provider === "anthropic" ? "claude-opus-5" : ""),
+    baseUrl: process.env.WEBBOT_LLM_BASE_URL?.trim() || "https://api.openai.com/v1",
+    thinking: (process.env.WEBBOT_LLM_THINKING?.trim().toLowerCase() || "adaptive") !== "off",
+    // Apagada por defecto: la mayoria de modelos que se enchufan aqui son de solo texto y una
+    // imagen les devuelve un 400. Quien tenga uno con vision la enciende a mano.
+    vision: ["on", "true", "1"].includes(process.env.WEBBOT_LLM_VISION?.trim().toLowerCase() || "off"),
+  };
+}
+
+export const llmEnv: LlmEnv = readLlmEnv();
+
+/** El .env, pero solo si alcanza para llamar a alguien. Es lo que usa el panel si nadie elige otra cosa. */
+function llmConfig(): LlmConfig | null {
+  const { provider, model, baseUrl, thinking, vision } = llmEnv;
+  if (!provider) return null;
   const apiKey = apiKeyFor(provider);
-  const baseUrl = process.env.WEBBOT_LLM_BASE_URL?.trim() || "https://api.openai.com/v1";
-  const model = process.env.WEBBOT_LLM_MODEL?.trim() || (provider === "anthropic" ? "claude-opus-5" : "");
 
   // Un modelo local no pide clave, pero sin modelo no hay nada que llamar.
   if (!model) return null;
   if (provider === "anthropic" && !apiKey) return null;
 
-  return {
-    provider,
-    model,
-    apiKey,
-    baseUrl,
-    thinking: (process.env.WEBBOT_LLM_THINKING?.trim().toLowerCase() || "adaptive") !== "off",
-    // Apagada por defecto: la mayoria de modelos que se enchufan aqui son de solo texto y una
-    // imagen les devuelve un 400. Quien tenga uno con vision la enciende a mano.
-    vision: ["on", "true", "1"].includes(process.env.WEBBOT_LLM_VISION?.trim().toLowerCase() || "off"),
-    timeoutMs: llmTimeoutMs,
-  };
+  return { provider, model, apiKey, baseUrl, thinking, vision, timeoutMs: llmTimeoutMs };
 }
+
 
 export const config = {
   get token(): string {

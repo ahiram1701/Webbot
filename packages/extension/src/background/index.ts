@@ -110,6 +110,27 @@ function connect(): Promise<void> {
   return connecting;
 }
 
+/**
+ * Tirar la conexion actual y levantar otra con los ajustes de ahora. No vale con llamar a connect():
+ * si ya habia un intento en vuelo, connect() devuelve esa promesa, y ese intento leyo los ajustes
+ * ANTES de guardar, asi que manda el hello viejo y el modelo recien elegido no llega al servidor.
+ * Hay que dejarlo terminar y abrir el nuestro encima.
+ */
+function reconnect(): Promise<void> {
+  reconnectDelayMs = RECONNECT_MIN_MS;
+  socket?.close();
+  socket = null;
+  return (connecting ?? Promise.resolve())
+    .catch(() => {
+      // Que el intento anterior fallara no cambia nada: el nuestro sale igual.
+    })
+    .then(() => {
+      socket?.close();
+      socket = null;
+      return connect();
+    });
+}
+
 async function openSocket(): Promise<void> {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
 
@@ -241,19 +262,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (!("token" in changes) && !("bridgePort" in changes) && !("llm" in changes)) return;
-  reconnectDelayMs = RECONNECT_MIN_MS;
-  socket?.close();
-  socket = null;
-  void connect();
+  void reconnect();
 });
 
 // El panel pregunta el estado al abrirse; responderle tambien despierta al worker.
 chrome.runtime.onMessage.addListener((message: { type?: string }, _sender, sendResponse) => {
   if (message?.type !== "webbot:reconnect") return undefined;
-  reconnectDelayMs = RECONNECT_MIN_MS;
-  socket?.close();
-  socket = null;
-  void connect().then(() => sendResponse({ ok: true }));
+  void reconnect().then(() => sendResponse({ ok: true }));
   return true;
 });
 

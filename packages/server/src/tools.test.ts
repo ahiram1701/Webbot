@@ -19,6 +19,13 @@ const SAMPLES: Record<string, unknown> = {
   webbot_screenshot: { tabId: 7 },
   webbot_click: { tabId: 7, target: { text: "Aceptar" } },
   webbot_type: { tabId: 7, target: { css: "input" }, text: "hola", submit: true },
+  webbot_fill_form: {
+    tabId: 7,
+    fields: [
+      { target: { css: "#id_1" }, value: "fue" },
+      { target: { css: "#acepto" }, value: true },
+    ],
+  },
   webbot_scroll: { tabId: 7, direction: "down" },
   webbot_post_social: { network: "x", text: "hola", dryRun: true },
   webbot_share_post: { tabId: 7, target: { text: "un chiste" }, comment: "jaja", dryRun: true },

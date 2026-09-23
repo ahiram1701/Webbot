@@ -1,4 +1,4 @@
-import type { ExtractMode, FieldSpec, Network, SiteProfile, Target } from "@webbot/shared";
+import type { ExtractMode, FieldSpec, FillField, Network, SiteProfile, Target } from "@webbot/shared";
 
 /** Lo que el runtime expone en la pagina una vez instalado. */
 export interface WebbotApi {
@@ -15,6 +15,7 @@ export interface WebbotApi {
   /** Las tres devuelven promesa: esperan a que la pagina se asiente para poder contar que cambio. */
   click(options: { target: Target }): Promise<unknown>;
   type(options: { target: Target; text: string; clear?: boolean; submit?: boolean }): Promise<unknown>;
+  fillForm(options: { fields: FillField[]; submit?: boolean }): Promise<unknown>;
   scroll(options: { direction: "up" | "down" | "top" | "bottom"; amount?: number }): Promise<unknown>;
   waitFor(options: { target: Target; timeoutMs?: number }): Promise<unknown>;
   sharePost(options: {
@@ -42,7 +43,7 @@ export interface WebbotApi {
   }): Promise<unknown>;
 }
 
-export const RUNTIME_VERSION = 19;
+export const RUNTIME_VERSION = 20;
 
 /**
  * Runtime que vive dentro de la pagina. Se inyecta con chrome.scripting.executeScript, que solo
@@ -55,7 +56,7 @@ export const RUNTIME_VERSION = 19;
 export function installWebbotRuntime(): void {
   // Subirla con cada cambio de comportamiento: una pagina que ya tenga inyectada la version
   // anterior la conserva hasta recargarse, y seguiria ejecutando el codigo viejo.
-  const RUNTIME_VERSION_INNER = 19;
+  const RUNTIME_VERSION_INNER = 20;
   const scope = globalThis as unknown as { __webbot?: WebbotApi };
   if (scope.__webbot && scope.__webbot.version === RUNTIME_VERSION_INNER) return;
 
@@ -530,6 +531,49 @@ export function installWebbotRuntime(): void {
     }
 
     throw new Error(`El elemento <${el.tagName.toLowerCase()}> no admite escritura de texto.`);
+  }
+
+  /** "true", "si", "x"... de un modelo que manda el booleano como texto. */
+  function asChecked(value: string | boolean): boolean {
+    if (typeof value === "boolean") return value;
+    return ["true", "si", "yes", "1", "x", "on", "marcar", "marcado"].includes(norm(value));
+  }
+
+  /**
+   * Deja un campo con el valor pedido segun lo que sea. Devuelve lo que quedo de verdad, que es lo
+   * que el agente tiene que leer: un select puede acabar en una opcion con otro texto.
+   */
+  async function fillField(el: Element, value: string | boolean): Promise<string | boolean> {
+    if (el instanceof HTMLSelectElement) {
+      const wanted = norm(String(value));
+      const options = Array.from(el.options);
+      const option =
+        options.find((o) => norm(o.value) === wanted || norm(o.text) === wanted) ??
+        options.find((o) => wanted !== "" && norm(o.text).includes(wanted));
+      if (!option) {
+        throw new Error(`Ninguna opcion encaja con "${String(value)}". Hay: ${options.map((o) => o.text.trim()).join(" | ")}`);
+      }
+      el.focus({ preventScroll: true });
+      el.value = option.value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return option.text.trim();
+    }
+
+    if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
+      const wanted = asChecked(value);
+      // Un radio no se desmarca pulsandolo: se desmarca marcando otro del grupo.
+      if (el.checked !== wanted && (wanted || el.type === "checkbox")) dispatchClick(el);
+      return el.checked;
+    }
+
+    if (typeof value === "boolean") {
+      throw new Error(`Un booleano solo vale para checkbox o radio, y esto es <${el.tagName.toLowerCase()}>.`);
+    }
+    const lexical = lexicalRoot(el);
+    if (lexical) await setLexicalText(lexical, value);
+    else setText(el, value, true);
+    return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : visibleText(el);
   }
 
   /** Raiz de un editor Lexical (el composer de Facebook), o null si el elemento no esta en uno. */
@@ -1889,6 +1933,42 @@ export function installWebbotRuntime(): void {
         typed: describeElement(el),
         value: value.slice(0, 500),
         submitted: Boolean(submit),
+        after: await pageAfter(antes),
+      };
+    },
+
+    async fillForm({ fields, submit }) {
+      const antes = snapshot();
+      const results: Array<{ index: number; ok: boolean; value?: string | boolean; error?: string }> = [];
+      let lastForm: HTMLFormElement | null = null;
+
+      // Campo a campo y sin cortar al primer fallo: un hueco mal localizado no debe tirar los otros
+      // nueve, y el agente necesita saber cuales quedaron para arreglar solo esos.
+      for (const [index, field] of fields.entries()) {
+        try {
+          const el = findOne(field.target);
+          el.scrollIntoView({ block: "center" });
+          const value = await fillField(el, field.value);
+          results.push({ index, ok: true, value });
+          const form = el instanceof HTMLInputElement || el instanceof HTMLSelectElement ? el.form : el.closest("form");
+          if (form) lastForm = form;
+        } catch (error) {
+          results.push({ index, ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+
+      const filled = results.filter((result) => result.ok).length;
+      if (filled === 0) {
+        throw Object.assign(new Error(`No se pudo rellenar ningun campo: ${JSON.stringify(results)}`), {
+          webbotCode: "element_not_found",
+        });
+      }
+      if (submit) lastForm?.requestSubmit?.();
+      return {
+        filled,
+        failed: results.length - filled,
+        results,
+        submitted: Boolean(submit && lastForm),
         after: await pageAfter(antes),
       };
     },

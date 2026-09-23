@@ -41,6 +41,13 @@ const DEFAULT_TURN_TIMEOUT_MS = 180_000;
 const MAX_RESULT_CHARS = 60_000;
 /** Lo que se ensena en el panel junto a cada paso. */
 const MAX_SUMMARY_CHARS = 300;
+/**
+ * Veces por instruccion que se le avisa al modelo de que escribio una llamada en vez de hacerla.
+ * Mas de dos y ya no es un despiste: es un modelo que no sabe usar herramientas.
+ */
+const MAX_TEXT_CALL_NUDGES = 2;
+/** Una llamada a herramienta escrita como texto: '"name": "webbot_type"' o 'webbot_type(...)'. */
+const TEXT_TOOL_CALL = /"name"\s*:\s*"(webbot_\w+)"|\b(webbot_\w+)\s*\(/;
 
 /**
  * La linea de la captura solo se dice si el modelo puede verla: invitarle a mirar una foto que no
@@ -92,6 +99,47 @@ export interface AgentRunner {
 function summarize(value: string): string {
   const flat = value.replace(/\s+/g, " ").trim();
   return flat.length > MAX_SUMMARY_CHARS ? `${flat.slice(0, MAX_SUMMARY_CHARS)}...` : flat;
+}
+
+const FREE_TEXT_KEYS = new Set(["text", "value", "comment", "css", "xpath", "name", "url", "contains"]);
+
+/**
+ * Arreglos para los argumentos que mandan los modelos pequenos: "true" por true, "3" por 3 y
+ * objetos metidos en una cadena, a veces con comillas simples y True/None de Python. Solo se usa
+ * cuando lo que llego no valida, asi que a un modelo que lo hace bien no le cambia nada.
+ */
+function coerceLoose(value: unknown, key = ""): unknown {
+  if (Array.isArray(value)) return value.map((inner) => coerceLoose(inner));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([name, inner]) => [name, coerceLoose(inner, name)]));
+  }
+  if (typeof value !== "string") return value;
+  // Un "3" o un "true" que hay que escribir en la pagina es texto, no un numero mal mandado.
+  if (FREE_TEXT_KEYS.has(key)) return value;
+  const trimmed = value.trim();
+  if (trimmed === "true" || trimmed === "false") return trimmed === "true";
+  if (/^-?\d+$/.test(trimmed)) return Number(trimmed);
+  if (/^[{[]/.test(trimmed)) {
+    const pythonish = trimmed
+      .replace(/'/g, '"')
+      .replace(/\bTrue\b/g, "true")
+      .replace(/\bFalse\b/g, "false")
+      .replace(/\bNone\b/g, "null");
+    for (const candidate of [trimmed, pythonish]) {
+      try {
+        return coerceLoose(dropEmpty(JSON.parse(candidate)));
+      } catch {
+        // se prueba la siguiente forma
+      }
+    }
+  }
+  return value;
+}
+
+/** '{"css": "#a", "xpath": ""}' trae vacios que un target no admite como criterio: fuera. */
+function dropEmpty(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.entries(value).filter(([, inner]) => inner !== "" && inner !== null));
 }
 
 const DATA_URL = /^data:(image\/[a-z+]+);base64,(.+)$/i;
@@ -207,10 +255,20 @@ export function createAgentRunner(
   ): Promise<LlmToolResult> => {
     const entry = WEBBOT_TOOLS_BY_NAME.get(call.name);
     if (!entry) {
-      return { id: call.id, name: call.name, ok: false, content: `No existe la herramienta '${call.name}'.` };
+      // Se ensena en el panel: una herramienta inventada que no deja rastro parece un agente parado.
+      const detail = `No existe la herramienta '${call.name}'.`;
+      emit(runId, { type: "tool", callId: call.id, name: call.name, input: call.input });
+      emit(runId, { type: "toolResult", callId: call.id, name: call.name, ok: false, summary: detail });
+      const names = WEBBOT_TOOLS.map((tool) => tool.name).join(", ");
+      return { id: call.id, name: call.name, ok: false, content: `${detail} Las que hay son: ${names}.` };
     }
 
-    const parsed = z.object(entry.shape).safeParse(call.input ?? {});
+    const schema = z.object(entry.shape);
+    let parsed = schema.safeParse(call.input ?? {});
+    if (!parsed.success) {
+      const loose = schema.safeParse(coerceLoose(call.input ?? {}));
+      if (loose.success) parsed = loose;
+    }
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       const detail = `${issue?.path.join(".") ?? ""} ${issue?.message ?? "argumentos invalidos"}`.trim();
@@ -253,6 +311,7 @@ export function createAgentRunner(
 
   const loop = async (runId: string, run: Run, prompt: string, context?: PanelContext): Promise<void> => {
     let input: LlmInput = { kind: "user", text: withContext(prompt, context) };
+    let nudges = 0;
 
     for (let step = 1; step <= AGENT_MAX_STEPS; step += 1) {
       // Dos motivos para abortar, y hay que distinguirlos: detener es del usuario y no merece
@@ -282,6 +341,20 @@ export function createAgentRunner(
       if (run.cancelled) return;
 
       if (turn.toolCalls.length === 0) {
+        // Hay modelos que escriben la llamada en el mensaje en vez de hacerla. Sin esto el run se
+        // daba por terminado sin haber tocado nada, y el panel lo contaba como si hubiera acabado.
+        const written = TEXT_TOOL_CALL.exec(turn.text);
+        if (written && nudges < MAX_TEXT_CALL_NUDGES) {
+          nudges += 1;
+          const name = written[1] ?? written[2];
+          input = {
+            kind: "user",
+            text:
+              `Escribiste la llamada a ${name} como texto en el mensaje y no se ejecuto nada. ` +
+              "Llamala como herramienta de verdad, sin escribirla en el texto.",
+          };
+          continue;
+        }
         emit(runId, { type: "done", steps: step });
         return;
       }

@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-import { ExtractModeSchema, FieldSpecSchema, NetworkSchema, TargetSchema, type Command } from "@webbot/shared";
+import {
+  ExtractModeSchema,
+  FieldSpecSchema,
+  FillFieldSchema,
+  NetworkSchema,
+  TargetSchema,
+  type Command,
+} from "@webbot/shared";
 
 /**
  * Catalogo unico de herramientas. Lo consumen los dos cerebros posibles: el servidor MCP, que las
@@ -181,6 +188,23 @@ export const WEBBOT_TOOLS: WebbotTool[] = [
   }),
 
   tool({
+    name: "webbot_fill_form",
+    description:
+      "Rellena VARIOS campos de una vez: formularios, huecos de una actividad de 'rellenar espacios', " +
+      "selects, checkbox y radio. value es texto para inputs, textareas y huecos; el valor o el texto de la " +
+      "opcion en un select; true/false en checkbox y radio. Saca cada target de webbot_outline. En value va " +
+      "la RESPUESTA de ese campo, nunca la instruccion que te dio la persona. Un campo que falla no para a los " +
+      "demas: devuelve en 'results' que quedo en cada uno, para reintentar solo los que fallaron. " +
+      "submit:true envia el formulario al terminar. Devuelve 'after' igual que webbot_click.",
+    shape: {
+      tabId,
+      fields: z.array(FillFieldSchema).min(1).max(50),
+      submit: z.boolean().optional().describe("true = envia el formulario tras rellenar. Por defecto false."),
+    },
+    toCommand: ({ tabId: id, fields, submit }) => ({ type: "page.fillForm", tabId: id, fields, submit }),
+  }),
+
+  tool({
     name: "webbot_scroll",
     description: "Desplaza la pagina. Util para disparar carga infinita antes de extraer.",
     shape: {
@@ -324,8 +348,8 @@ const ALCANCE_PUBLICAR =
 /** Como se conduce la pagina. Igual para los dos cerebros. */
 const CONDUCIR = [
   "Webbot conduce el Chrome del usuario a traves de una extension MV3: extrae texto, hace clic y escribe en paginas, y publica en Facebook/X.",
-  "Flujo tipico: 1) webbot_list_tabs o webbot_open_tab para tener un tabId. 2) webbot_outline para VER que hay en la pagina y descubrir el selector del boton o campo. 3) webbot_click / webbot_type para actuar. 4) webbot_extract para leer el resultado.",
-  "webbot_click, webbot_type y webbot_scroll esperan a que la pagina se asiente y devuelven en 'after' la url y el titulo nuevos, que elementos aparecieron y cuales desaparecieron, y el dialogo abierto si lo hay. Encadena leyendo ese 'after' en vez de repetir webbot_outline tras cada accion: gastas la mitad de pasos y ademas ves la pagina ya repintada.",
+  "Flujo tipico: 1) webbot_list_tabs o webbot_open_tab para tener un tabId. 2) webbot_outline para VER que hay en la pagina y descubrir el selector del boton o campo. 3) webbot_click / webbot_type para actuar, o webbot_fill_form para rellenar varios campos en una sola llamada. 4) webbot_extract para leer el resultado.",
+  "webbot_click, webbot_type, webbot_fill_form y webbot_scroll esperan a que la pagina se asiente y devuelven en 'after' la url y el titulo nuevos, que elementos aparecieron y cuales desaparecieron, y el dialogo abierto si lo hay. Encadena leyendo ese 'after' en vez de repetir webbot_outline tras cada accion: gastas la mitad de pasos y ademas ves la pagina ya repintada.",
   "Si 'after.dialog' no es null hay una capa encima bloqueando la pagina (un banner de cookies, un modal): resuelvela primero pulsando algo de 'dialog.elements', porque hasta entonces lo demas no responde.",
   "Cuando un clic falle con element_not_found o element_not_visible, usa webbot_describe con ese mismo target antes de reintentar: ve tambien los elementos ocultos y dice si estan deshabilitados.",
   "webbot_outline es la herramienta clave antes de interactuar: devuelve roles, textos y un selector sugerido por elemento. No adivines selectores, miralos primero.",

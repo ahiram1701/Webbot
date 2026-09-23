@@ -45,6 +45,15 @@ export const FieldSpecSchema = z.object({
 });
 export type FieldSpec = z.infer<typeof FieldSpecSchema>;
 
+/** Un campo de un formulario y lo que hay que dejar en el: texto u opcion, o marcado si/no. */
+export const FillFieldSchema = z.object({
+  target: TargetSchema,
+  value: z
+    .union([z.string(), z.boolean()])
+    .describe("Texto para inputs y huecos, valor o texto de la opcion en un select, true/false en checkbox y radio."),
+});
+export type FillField = z.infer<typeof FillFieldSchema>;
+
 export const ExtractModeSchema = z.enum(["readable", "full", "selectors"]);
 export type ExtractMode = z.infer<typeof ExtractModeSchema>;
 
@@ -81,6 +90,13 @@ export const CommandSchema = z.discriminatedUnion("type", [
     target: TargetSchema,
     text: z.string(),
     clear: z.boolean().optional(),
+    submit: z.boolean().optional(),
+  }),
+  /** Varios campos de una vez: rellenar un formulario campo a campo gasta un paso por hueco. */
+  z.object({
+    type: z.literal("page.fillForm"),
+    tabId,
+    fields: z.array(FillFieldSchema).min(1).max(50),
     submit: z.boolean().optional(),
   }),
   z.object({

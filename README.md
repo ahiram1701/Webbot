@@ -219,6 +219,7 @@ Se añade el hostname exacto, no el dominio padre: permitir `gist.github.com` no
 | `webbot_links` | Enlaces con filtro por texto o por dominio propio. |
 | `webbot_screenshot` | Captura PNG de la parte visible. Le llega al modelo como imagen si tiene visión. |
 | `webbot_click` / `webbot_type` / `webbot_scroll` / `webbot_wait_for` | Interacción. |
+| `webbot_fill_form` | Rellena varios campos en una llamada (texto, huecos, select, checkbox, radio) y dice qué quedó en cada uno. |
 | `webbot_post_social` | Publica en Facebook o X, y con `groups` comparte además en grupos. |
 | `webbot_share_post` | Comparte en tu muro una publicación de Facebook que ya existe. |
 | `webbot_flow_list` / `webbot_flow_run` | Flujos guardados. |

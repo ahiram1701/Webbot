@@ -68,6 +68,7 @@ function describeCommand(command: Command): string | undefined {
     case "page.outline":
     case "page.click":
     case "page.type":
+    case "page.fillForm":
     case "page.scroll":
     case "page.screenshot":
       return `pestana ${command.tabId}`;

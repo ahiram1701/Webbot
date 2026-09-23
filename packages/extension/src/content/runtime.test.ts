@@ -265,6 +265,77 @@ describe("type", () => {
   });
 });
 
+describe("fillForm", () => {
+  interface Relleno {
+    filled: number;
+    failed: number;
+    results: Array<{ index: number; ok: boolean; value?: string | boolean; error?: string }>;
+  }
+
+  it("rellena huecos de texto, un select y una casilla en una sola llamada", async () => {
+    document.body.innerHTML = `
+      <form>
+        <p>Ayer <input id="id_1" /> al cine y <input id="id_2" /> palomitas.</p>
+        <select id="tiempo"><option value="">--</option><option value="pas">Pasado</option><option value="fut">Futuro</option></select>
+        <input type="checkbox" id="listo" />
+      </form>`;
+    const cambios = vi.fn();
+    document.getElementById("tiempo")?.addEventListener("change", cambios);
+
+    const result = (await api.fillForm({
+      fields: [
+        { target: { css: "#id_1" }, value: "fui" },
+        { target: { css: "#id_2" }, value: "comi" },
+        { target: { css: "#tiempo" }, value: "pasado" },
+        { target: { css: "#listo" }, value: true },
+      ],
+    })) as Relleno;
+
+    expect((document.getElementById("id_1") as HTMLInputElement).value).toBe("fui");
+    expect((document.getElementById("id_2") as HTMLInputElement).value).toBe("comi");
+    expect((document.getElementById("tiempo") as HTMLSelectElement).value).toBe("pas");
+    expect(cambios).toHaveBeenCalled();
+    expect((document.getElementById("listo") as HTMLInputElement).checked).toBe(true);
+    expect(result).toMatchObject({ filled: 4, failed: 0 });
+  });
+
+  it("un campo que no existe no impide rellenar los demas, y se dice cual fue", async () => {
+    document.body.innerHTML = `<input id="a" /><input id="b" />`;
+
+    const result = (await api.fillForm({
+      fields: [
+        { target: { css: "#a" }, value: "uno" },
+        { target: { css: "#no-esta" }, value: "dos" },
+        { target: { css: "#b" }, value: "tres" },
+      ],
+    })) as Relleno;
+
+    expect((document.getElementById("a") as HTMLInputElement).value).toBe("uno");
+    expect((document.getElementById("b") as HTMLInputElement).value).toBe("tres");
+    expect(result.failed).toBe(1);
+    expect(result.results[1]).toMatchObject({ index: 1, ok: false });
+  });
+
+  it("acepta la casilla como texto y no desmarca una que ya estaba bien", async () => {
+    document.body.innerHTML = `<input type="checkbox" id="c1" /><input type="checkbox" id="c2" checked />`;
+
+    await api.fillForm({
+      fields: [
+        { target: { css: "#c1" }, value: "si" },
+        { target: { css: "#c2" }, value: true },
+      ],
+    });
+
+    expect((document.getElementById("c1") as HTMLInputElement).checked).toBe(true);
+    expect((document.getElementById("c2") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("dice que opciones hay cuando ninguna encaja", async () => {
+    document.body.innerHTML = `<select id="s"><option>Rojo</option><option>Verde</option></select>`;
+    await expect(api.fillForm({ fields: [{ target: { css: "#s" }, value: "azul" }] })).rejects.toThrow(/Rojo | Verde/);
+  });
+});
+
 /**
  * Lo que devuelve una accion sobre el estado de despues. Es el nucleo de que el agente no tenga que
  * gastar un outline detras de cada clic para enterarse de lo que provoco.

@@ -444,6 +444,75 @@ describe("agente del panel", () => {
     expect(commands).toEqual([]);
     const result = provider.inputs[1] as Extract<LlmInput, { kind: "toolResults" }>;
     expect(result.results[0]?.content).toContain("No existe la herramienta");
+    // Con la lista delante el modelo elige una que existe en vez de inventar otra.
+    expect(result.results[0]?.content).toContain("webbot_fill_form");
+    // Y en el panel se ve, en vez de parecer que el agente se quedo parado.
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool", name: "webbot_inventada" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "toolResult", name: "webbot_inventada", ok: false }));
+  });
+
+  it("si el modelo escribe la llamada como texto se lo dice, en vez de dar la tarea por hecha", async () => {
+    const escrita =
+      '{"name": "webbot_type", "parameters": {"tabId": 7, "target": {"css": "#id_1"}, "text": "fui"}}';
+    const provider = fakeProvider([
+      turn({ text: escrita, stop: "end" }),
+      turn({
+        stop: "tools",
+        toolCalls: [{ id: "c1", name: "webbot_type", input: { tabId: 7, target: { css: "#id_1" }, text: "fui" } }],
+      }),
+      turn({ text: "Hecho.", stop: "end" }),
+    ]);
+    const { bridge, commands, events } = fakeBridge();
+
+    createAgentRunner(bridge, provider).handle({ kind: "agent.start", runId: "r1", prompt: "rellena el hueco" });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    expect(provider.inputs[1]).toMatchObject({ kind: "user", text: expect.stringContaining("webbot_type") });
+    expect(commands).toEqual([
+      { type: "page.type", tabId: 7, target: { css: "#id_1" }, text: "fui", clear: undefined, submit: undefined },
+    ]);
+  });
+
+  it("no insiste para siempre con un modelo que solo sabe escribir las llamadas", async () => {
+    const escrita = '{"name": "webbot_outline", "arguments": {"tabId": 7}}';
+    const provider = fakeProvider([turn({ text: escrita }), turn({ text: escrita }), turn({ text: escrita })]);
+    const { bridge, commands, events } = fakeBridge();
+
+    createAgentRunner(bridge, provider).handle({ kind: "agent.start", runId: "r1", prompt: "mira" });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    expect(provider.inputs).toHaveLength(3);
+    expect(commands).toEqual([]);
+  });
+
+  it("arregla los argumentos que un modelo pequeno manda como texto", async () => {
+    const provider = fakeProvider([
+      turn({
+        stop: "tools",
+        toolCalls: [
+          {
+            id: "c1",
+            name: "webbot_type",
+            input: {
+              tabId: "7",
+              target: "{'css': '#id_1', 'xpath': '', 'text': '', 'role': '', 'name': '', 'index': 0}",
+              text: "3",
+              clear: "true",
+              submit: "false",
+            },
+          },
+        ],
+      }),
+      turn({ text: "Hecho.", stop: "end" }),
+    ]);
+    const { bridge, commands, events } = fakeBridge();
+
+    createAgentRunner(bridge, provider).handle({ kind: "agent.start", runId: "r1", prompt: "pon un 3" });
+    await waitFor(() => events.some((event) => event.type === "done"), "done");
+
+    expect(commands).toEqual([
+      { type: "page.type", tabId: 7, target: { css: "#id_1", index: 0 }, text: "3", clear: true, submit: false },
+    ]);
   });
 
   it("devuelve el error de validacion cuando los argumentos no encajan", async () => {

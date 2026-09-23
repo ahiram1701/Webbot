@@ -267,6 +267,11 @@ export async function runCommand(command: Command, context: CommandContext): Pro
       });
     }
 
+    case "page.fillForm": {
+      await requireAllowedTab(command.tabId, settings.allowlist);
+      return callRuntime(command.tabId, "fillForm", { fields: command.fields, submit: command.submit });
+    }
+
     case "page.scroll": {
       await requireAllowedTab(command.tabId, settings.allowlist);
       return callRuntime(command.tabId, "scroll", { direction: command.direction, amount: command.amount });

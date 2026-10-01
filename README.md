@@ -1,5 +1,7 @@
 # Webbot
 
+[![CI](https://github.com/ahiram1701/Webbot/actions/workflows/ci.yml/badge.svg)](https://github.com/ahiram1701/Webbot/actions/workflows/ci.yml)
+
 Extensión de Chrome (Manifest V3) que extrae texto de sitios web, automatiza clics y escritura en
 páginas, y publica en Facebook y X usando la sesión que ya tienes abierta en el navegador. Se le
 puede pedir en lenguaje natural desde su panel lateral, o conducirla desde un agente externo por MCP.
@@ -478,6 +480,26 @@ Publica el puente en `127.0.0.1:8790` y el MCP HTTP en `http://127.0.0.1:8791/mc
 extensión no nota la diferencia. El transporte stdio se queda fuera de Docker a propósito: el
 cliente MCP lo lanza como subproceso local y envolverlo en `docker run -i` solo añade latencia.
 
+## CI y publicación de versiones
+
+Cada PR y cada push a `master` pasan `npm run verify` en Node 20 y 24
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Lo que se publica sale solo de commits
+que lo han pasado:
+
+- **Imagen del servidor**: cada fusión en `master` publica `ghcr.io/ahiram1701/webbot:latest`; en
+  un PR solo se comprueba que construye.
+- **Versión**: sube `version` en `package.json` y en `packages/extension/package.json` (el manifest
+  la toma de ahí), fusiona, y etiqueta:
+
+  ```bash
+  git tag v0.2.0 && git push origin v0.2.0
+  ```
+
+  Eso publica `ghcr.io/ahiram1701/webbot:0.2.0` y crea una release con
+  `webbot-extension-v0.2.0.zip`, que se instala descomprimido desde `chrome://extensions`. Si el tag
+  no coincide con la versión de la extensión, la release falla en vez de publicar un zip mal
+  numerado.
+
 ## Resolución de problemas
 
 | Síntoma | Causa habitual |
@@ -498,3 +520,17 @@ cliente MCP lo lanza como subproceso local y envolverlo en `docker run -i` solo 
 | `deadline_exceeded` | El flujo llegó a Publicar fuera de plazo y abortó sin pulsar. No se publicó nada. |
 | `composer_text_mismatch` | El editor no quedó con el texto pedido, así que no se publica. |
 | El worker parece dormido | La alarma de keepalive lo revive en menos de 30 s; el panel fuerza la reconexión. |
+
+## Licencia
+
+Webbot se distribuye bajo la [PolyForm Noncommercial License 1.0.0](LICENSE).
+Copyright 2026 Alberto Hiram Saucedo Guajardo.
+
+- **Libre** para uso personal, aficiones, estudio, investigación, enseñanza y para organizaciones
+  sin ánimo de lucro, instituciones educativas y organismos públicos.
+- **El uso comercial** (dentro de una empresa, o como parte de un producto o servicio de pago)
+  necesita una licencia aparte. Pídela abriendo un issue en
+  [GitHub](https://github.com/ahiram1701/Webbot/issues).
+
+Quien redistribuya el código, modificado o no, debe incluir el fichero `LICENSE` con su línea
+`Required Notice:`.

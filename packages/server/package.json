@@ -2,6 +2,7 @@
   "name": "@webbot/server",
   "version": "0.1.0",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
     "mcp": "tsx src/stdio.ts",

@@ -498,3 +498,17 @@ cliente MCP lo lanza como subproceso local y envolverlo en `docker run -i` solo 
 | `deadline_exceeded` | El flujo llegó a Publicar fuera de plazo y abortó sin pulsar. No se publicó nada. |
 | `composer_text_mismatch` | El editor no quedó con el texto pedido, así que no se publica. |
 | El worker parece dormido | La alarma de keepalive lo revive en menos de 30 s; el panel fuerza la reconexión. |
+
+## Licencia
+
+Webbot se distribuye bajo la [PolyForm Noncommercial License 1.0.0](LICENSE).
+Copyright 2026 Alberto Hiram Saucedo Guajardo.
+
+- **Libre** para uso personal, aficiones, estudio, investigación, enseñanza y para organizaciones
+  sin ánimo de lucro, instituciones educativas y organismos públicos.
+- **El uso comercial** (dentro de una empresa, o como parte de un producto o servicio de pago)
+  necesita una licencia aparte. Pídela abriendo un issue en
+  [GitHub](https://github.com/ahiram1701/Webbot/issues).
+
+Quien redistribuya el código, modificado o no, debe incluir el fichero `LICENSE` con su línea
+`Required Notice:`.

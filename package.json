@@ -2,6 +2,8 @@
   "name": "webbot",
   "version": "0.1.0",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "Alberto Hiram Saucedo Guajardo",
   "type": "module",
   "description": "Extension de Chrome (MV3) controlable por agentes IA via MCP: extraccion de texto, automatizacion de clics y publicacion en redes sociales.",
   "engines": { "node": ">=20" },

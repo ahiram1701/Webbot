@@ -55,8 +55,13 @@ export function apiKeyFor(provider: "anthropic" | "openai"): string {
   );
 }
 
-/** Techo por turno, comun a cualquier modelo: no cambia porque se elija otro desde Opciones. */
+/**
+ * Silencio maximo del modelo en un turno, comun a cualquier modelo: no cambia porque se elija otro
+ * desde Opciones. Se rearma con cada trozo del stream.
+ */
 export const llmTimeoutMs = intFromEnv("WEBBOT_LLM_TIMEOUT_MS", 180_000);
+/** Techo del turno entero, aunque el modelo no pare de enviar. */
+export const llmMaxTurnMs = intFromEnv("WEBBOT_LLM_MAX_TURN_MS", 600_000);
 
 /**
  * Lo que dice el .env del modelo, tal cual, sin exigir que este completo. Va aparte de llmConfig()

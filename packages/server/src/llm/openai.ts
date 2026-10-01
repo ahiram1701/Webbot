@@ -68,6 +68,8 @@ async function readStream(response: Response, handlers: LlmHandlers): Promise<St
   const partials = new Map<number, PartialToolCall>();
 
   const handleChunk = (raw: string): void => {
+    // Solo cuentan los datos: los comentarios de keepalive llegan tambien con la peticion en cola.
+    handlers.onActivity?.();
     if (raw === "[DONE]") return;
     let chunk: {
       choices?: Array<{

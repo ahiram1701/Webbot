@@ -32,11 +32,13 @@ export interface AgentBridge {
 /** Sin respuesta a una confirmacion, el run no puede quedarse colgado para siempre. */
 const CONFIRM_TIMEOUT_MS = 5 * 60_000;
 /**
- * Techo por turno del modelo. Generoso a proposito: hay proveedores que tardan un minuto en soltar
- * el primer byte. Lo que evita es que un proveedor que no contesta deje el run esperando para
- * siempre, sin mas salida que el boton Detener.
+ * Silencio maximo del modelo dentro de un turno. Se rearma con cada trozo del stream, asi que un
+ * modelo que razona o escribe una llamada larga no lo agota; uno que se queda callado si. Generoso
+ * a proposito: hay proveedores que tardan un minuto en soltar el primer byte.
  */
 const DEFAULT_TURN_TIMEOUT_MS = 180_000;
+/** Techo del turno entero aunque no pare de llegar algo: que un bucle del modelo no sea eterno. */
+const DEFAULT_MAX_TURN_MS = 600_000;
 /** Tope de lo que se le devuelve al modelo por herramienta: una extraccion entera lo ahoga. */
 const MAX_RESULT_CHARS = 60_000;
 /** Lo que se ensena en el panel junto a cada paso. */
@@ -182,6 +184,7 @@ export function createAgentRunner(
   provider: LlmProvider | null,
   providerError: LlmError | null = null,
   turnTimeoutMs: number = DEFAULT_TURN_TIMEOUT_MS,
+  maxTurnMs: number = DEFAULT_MAX_TURN_MS,
 ): AgentRunner {
   const runs = new Map<string, Run>();
   // Mutables porque Opciones puede elegir otro modelo: la referencia cambia, el bucle no.
@@ -314,29 +317,46 @@ export function createAgentRunner(
     let nudges = 0;
 
     for (let step = 1; step <= AGENT_MAX_STEPS; step += 1) {
-      // Dos motivos para abortar, y hay que distinguirlos: detener es del usuario y no merece
-      // mensaje de error; agotar el plazo si, porque el proveedor se quedo callado.
-      const expired = AbortSignal.timeout(turnTimeoutMs);
+      // Tres motivos para abortar, y hay que distinguirlos: detener es del usuario y no merece
+      // mensaje de error; el silencio y el techo si, y cada uno pide una salida distinta.
+      const silent = new AbortController();
+      let idle: NodeJS.Timeout | undefined;
+      const rearm = (): void => {
+        clearTimeout(idle);
+        idle = setTimeout(() => silent.abort(), turnTimeoutMs);
+      };
+      const expired = AbortSignal.timeout(maxTurnMs);
       let turn;
+      rearm();
       try {
         turn = await run.conversation.send(
           input,
           {
             onText: (delta) => emit(runId, { type: "text", delta }),
             onReasoning: (delta) => emit(runId, { type: "reasoning", delta }),
+            onActivity: rearm,
           },
-          AbortSignal.any([run.controller.signal, expired]),
+          AbortSignal.any([run.controller.signal, silent.signal, expired]),
         );
       } catch (error) {
         if (run.cancelled) return;
-        if (expired.aborted) {
+        if (silent.signal.aborted) {
           throw new LlmError(
             `El modelo no respondio en ${Math.round(turnTimeoutMs / 1_000)} s. Puede ir saturado; ` +
               "reintenta o usa un modelo mas rapido en WEBBOT_LLM_MODEL.",
             ErrorCodes.LLM_ERROR,
           );
         }
+        if (expired.aborted) {
+          throw new LlmError(
+            `El modelo siguio trabajando ${Math.round(maxTurnMs / 60_000)} min sin acabar el turno. ` +
+              "Prueba con una instruccion mas acotada o sube WEBBOT_LLM_MAX_TURN_MS.",
+            ErrorCodes.LLM_ERROR,
+          );
+        }
         throw error;
+      } finally {
+        clearTimeout(idle);
       }
       if (run.cancelled) return;
 

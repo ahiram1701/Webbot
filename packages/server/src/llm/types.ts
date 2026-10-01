@@ -52,6 +52,11 @@ export interface LlmHandlers {
   onText(delta: string): void;
   /** Solo lo llaman los proveedores que exponen su razonamiento. */
   onReasoning?(delta: string): void;
+  /**
+   * Cualquier trozo que llegue del stream, tambien los argumentos de una herramienta, que no pasan
+   * por onText. Es lo que dice que el modelo sigue trabajando aunque el turno vaya para largo.
+   */
+  onActivity?(): void;
 }
 
 export interface LlmConversation {

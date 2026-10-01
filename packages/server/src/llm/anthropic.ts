@@ -101,6 +101,7 @@ export function createAnthropicProvider(options: AnthropicOptions): LlmProvider 
               },
               { signal },
             );
+            stream.on("streamEvent", () => handlers.onActivity?.());
             stream.on("text", (delta) => handlers.onText(delta));
             stream.on("thinking", (delta) => handlers.onReasoning?.(delta));
             message = await stream.finalMessage();

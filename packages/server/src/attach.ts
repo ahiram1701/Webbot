@@ -2,7 +2,7 @@ import { ErrorCodes, type LlmChoice, type LlmStatus } from "@webbot/shared";
 
 import { createAgentRunner } from "./agent.js";
 import type { Bridge } from "./bridge.js";
-import { apiKeyFor, config, llmEnv, llmTimeoutMs, log } from "./config.js";
+import { apiKeyFor, config, llmEnv, llmMaxTurnMs, llmTimeoutMs, log } from "./config.js";
 import { createProvider, LlmError, NO_LLM_MESSAGE, type LlmConfig, type LlmProvider } from "./llm/index.js";
 
 /** Ultimo recurso cuando ni Opciones ni el .env dicen a que endpoint compatible llamar. */
@@ -81,7 +81,7 @@ export function attachAgent(bridge: Bridge): void {
 
   bridge.describeLlm(describe(inicial.provider, inicial.error));
 
-  const runner = createAgentRunner(bridge, inicial.provider, inicial.error, llmTimeoutMs);
+  const runner = createAgentRunner(bridge, inicial.provider, inicial.error, llmTimeoutMs, llmMaxTurnMs);
   bridge.onExtensionFrame((frame) => runner.handle(frame));
   bridge.onExtensionGone(() => runner.stopAll());
 

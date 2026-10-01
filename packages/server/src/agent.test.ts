@@ -383,6 +383,60 @@ describe("agente del panel", () => {
     expect(fallo.code).toBe(ErrorCodes.LLM_ERROR);
   });
 
+  it("un modelo lento que sigue enviando no agota el plazo de silencio", async () => {
+    // Late cada 20 ms durante 150 ms con un silencio maximo de 50: con un plazo total habria caido.
+    const lento: LlmProvider = {
+      label: "lento:modelo",
+      vision: false,
+      start: () => ({
+        send: (_input, handlers, signal) =>
+          new Promise((resolve, reject) => {
+            const latido = setInterval(() => handlers.onActivity?.(), 20);
+            signal.addEventListener("abort", () => {
+              clearInterval(latido);
+              reject(new Error("abortado"));
+            });
+            setTimeout(() => {
+              clearInterval(latido);
+              resolve(turn({ text: "hecho" }));
+            }, 150);
+          }),
+      }),
+    };
+    const { bridge, events } = fakeBridge();
+
+    createAgentRunner(bridge, lento, null, 50).handle({ kind: "agent.start", runId: "r1", prompt: "haz algo largo" });
+    await waitFor(() => events.some((event) => event.type === "done" || event.type === "error"), "fin");
+
+    expect(events.some((event) => event.type === "error")).toBe(false);
+    expect(events.some((event) => event.type === "done")).toBe(true);
+  });
+
+  it("aunque no pare de enviar, el turno tiene techo", async () => {
+    const eterno: LlmProvider = {
+      label: "eterno:modelo",
+      vision: false,
+      start: () => ({
+        send: (_input, handlers, signal) =>
+          new Promise((_resolve, reject) => {
+            const latido = setInterval(() => handlers.onActivity?.(), 10);
+            signal.addEventListener("abort", () => {
+              clearInterval(latido);
+              reject(new Error("abortado"));
+            });
+          }),
+      }),
+    };
+    const { bridge, events } = fakeBridge();
+
+    createAgentRunner(bridge, eterno, null, 50, 120).handle({ kind: "agent.start", runId: "r1", prompt: "haz algo" });
+    await waitFor(() => events.some((event) => event.type === "error"), "error");
+
+    const fallo = events.find((event) => event.type === "error") as Extract<AgentEvent, { type: "error" }>;
+    expect(fallo.message).toContain("WEBBOT_LLM_MAX_TURN_MS");
+    expect(fallo.code).toBe(ErrorCodes.LLM_ERROR);
+  });
+
   it("detener no se reporta como un plazo agotado", async () => {
     const mudo: LlmProvider = {
       label: "mudo:modelo",
